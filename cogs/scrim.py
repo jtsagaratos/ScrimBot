@@ -24,6 +24,7 @@ from models.time_utils import (
 
 SCRIM_STATUSES = ["Scheduled", "Checked In", "In Progress", "Completed", "Cancelled"]
 SCRIM_STATUS_CHOICES = [app_commands.Choice(name=status, value=status) for status in SCRIM_STATUSES]
+EVENT_DIVIDER = "------------------------------"
 
 
 class ScrimEditModal(discord.ui.Modal):
@@ -105,7 +106,10 @@ class ScrimEditModal(discord.ui.Modal):
                 )
 
             updated = self.cog.db.get_scrim(self.guild_id, scrim["id"])
-            await interaction.response.send_message(f"**Scrim Event Updated**\n{self.cog.build_scrim_line(updated)}")
+            await interaction.response.send_message(
+                f"**Scrim Event Updated**\n{self.cog.build_scrim_line(updated)}",
+                ephemeral=True,
+            )
         except Exception as e:
             await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
 
@@ -133,7 +137,11 @@ class ScrimPageView(discord.ui.View):
         start = self.page * self.page_size
         end = start + self.page_size
         for scrim in self.scrims[start:end]:
-            embed.add_field(name=f"Event ID {self.cog.format_public_id(scrim)}", value=self.cog.build_scrim_line(scrim), inline=False)
+            embed.add_field(
+                name=self.cog.scrim_event_name(scrim["team_name"]),
+                value=self.cog.build_scrim_line(scrim),
+                inline=False,
+            )
         return embed
 
     def update_buttons(self):
@@ -238,18 +246,21 @@ class ScrimCog(commands.Cog):
     def build_scrim_line(self, scrim: dict) -> str:
         archived = " | Archived" if scrim.get("archived") else ""
         return (
-            f"`Event ID {self.format_public_id(scrim)}` {discord_time_display(scrim['datetime'], scrim['timezone'])}\n"
-            f"{self.scrim_event_name(scrim['team_name'])} | {scrim['duration_hours']:g}h | {scrim['status']}{archived}"
+            f"{discord_time_display(scrim['datetime'], scrim['timezone'])}\n"
+            f"Duration: {scrim['duration_hours']:g}h\n"
+            f"Status: {scrim['status']}{archived}\n"
+            f"-# Event ID: {self.format_public_id(scrim)}"
         )
 
     def build_scrim_created_message(self, guild: discord.Guild, scrim: dict, event_url: Optional[str] = None) -> str:
-        confirmation = ""
+        confirmation = f"{EVENT_DIVIDER}\n"
         confirmation += f"**{self.scrim_event_name(scrim['team_name'])}**\n"
-        confirmation += f"**Event ID:** {self.format_public_id(scrim)}\n"
         confirmation += f"**Time:** {discord_time_display(scrim['datetime'], scrim['timezone'])}\n"
         confirmation += f"**Duration:** {scrim['duration_hours']:g} hour(s)"
         if event_url:
             confirmation += f"\n**Event Link:** {event_url}"
+        confirmation += f"\n-# Event ID: {self.format_public_id(scrim)}"
+        confirmation += f"\n{EVENT_DIVIDER}"
         return confirmation
 
     async def post_scrim_created_message(
@@ -357,7 +368,7 @@ class ScrimCog(commands.Cog):
     ):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             guild = interaction.guild
             if not guild:
@@ -403,11 +414,15 @@ class ScrimCog(commands.Cog):
             target_channel = self.get_scrim_event_channel(guild)
             if target_channel:
                 await self.post_scrim_created_message(guild, interaction.channel, created_scrim, scheduled_event.url)
-                await interaction.followup.send(f"Scrim Event ID {self.format_public_id(event_database_id)} posted in {target_channel.mention}.")
+                await interaction.followup.send(
+                    f"Scrim Event ID {self.format_public_id(event_database_id)} posted in {target_channel.mention}.",
+                    ephemeral=True,
+                )
             else:
                 await interaction.followup.send(
                     self.build_scrim_created_message(guild, created_scrim, scheduled_event.url),
                     allowed_mentions=discord.AllowedMentions(roles=True),
+                    ephemeral=True,
                 )
         except ValueError as e:
             await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
@@ -454,7 +469,7 @@ class ScrimCog(commands.Cog):
             include_archived=include_archived,
         )
         if not scrims:
-            await interaction.followup.send("No scrim events scheduled.")
+            await interaction.followup.send("No scrim events scheduled.", ephemeral=True)
             return
 
         view = ScrimPageView(self, scrims, "Scrim Schedule")
@@ -487,7 +502,7 @@ class ScrimCog(commands.Cog):
             include_archived=include_archived,
         )
         if not scrims:
-            await interaction.followup.send(f"No scrim events scheduled in the next {days} day(s).")
+            await interaction.followup.send(f"No scrim events scheduled in the next {days} day(s).", ephemeral=True)
             return
 
         view = ScrimPageView(self, scrims, f"Upcoming Scrim Events ({days} days)")
@@ -499,7 +514,7 @@ class ScrimCog(commands.Cog):
     async def scrim_status(self, interaction: discord.Interaction, event_id: str, status: str):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             guild = interaction.guild
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -512,7 +527,7 @@ class ScrimCog(commands.Cog):
             status = self.normalize_status(status)
             self.db.update_scrim(guild.id, event_database_id, status=status)
             updated = self.db.get_scrim(guild.id, event_database_id)
-            await interaction.followup.send(f"**Scrim Event Status Updated**\n{self.build_scrim_line(updated)}")
+            await interaction.followup.send(f"**Scrim Event Status Updated**\n{self.build_scrim_line(updated)}", ephemeral=True)
         except Exception as e:
             if interaction.response.is_done():
                 await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
@@ -617,7 +632,7 @@ class ScrimCog(commands.Cog):
     async def scrim_delete(self, interaction: discord.Interaction, event_id: str):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             guild = interaction.guild
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -630,7 +645,7 @@ class ScrimCog(commands.Cog):
             if scrim["discord_event_id"]:
                 await self.delete_discord_event(guild, scrim["discord_event_id"])
             self.db.delete_scrim(guild.id, event_database_id)
-            await interaction.followup.send(f"Scrim Event ID {self.format_public_id(event_database_id)} deleted.")
+            await interaction.followup.send(f"Scrim Event ID {self.format_public_id(event_database_id)} deleted.", ephemeral=True)
         except Exception as e:
             if interaction.response.is_done():
                 await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)

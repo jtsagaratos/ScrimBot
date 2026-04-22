@@ -24,6 +24,7 @@ from models.time_utils import (
 
 TOURNAMENT_STATUSES = ["Scheduled", "Checked In", "In Progress", "Completed", "Cancelled"]
 TOURNAMENT_STATUS_CHOICES = [app_commands.Choice(name=status, value=status) for status in TOURNAMENT_STATUSES]
+EVENT_DIVIDER = "------------------------------"
 
 
 class TournamentEditModal(discord.ui.Modal):
@@ -105,7 +106,10 @@ class TournamentEditModal(discord.ui.Modal):
                 )
 
             updated = self.cog.db.get_tournament(self.guild_id, tournament["id"])
-            await interaction.response.send_message(f"**Tournament Event Updated**\n{self.cog.build_tournament_line(updated)}")
+            await interaction.response.send_message(
+                f"**Tournament Event Updated**\n{self.cog.build_tournament_line(updated)}",
+                ephemeral=True,
+            )
         except Exception as e:
             await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
 
@@ -134,7 +138,7 @@ class TournamentPageView(discord.ui.View):
         end = start + self.page_size
         for tournament in self.tournaments[start:end]:
             embed.add_field(
-                name=f"Event ID {self.cog.format_public_id(tournament)}",
+                name=self.cog.tournament_event_name(tournament["tournament_name"]),
                 value=self.cog.build_tournament_line(tournament),
                 inline=False,
             )
@@ -242,18 +246,21 @@ class TournamentCog(commands.Cog):
     def build_tournament_line(self, tournament: dict) -> str:
         archived = " | Archived" if tournament.get("archived") else ""
         return (
-            f"`Event ID {self.format_public_id(tournament)}` {discord_time_display(tournament['datetime'], tournament['timezone'])}\n"
-            f"{self.tournament_event_name(tournament['tournament_name'])} | "
-            f"{tournament['duration_hours']:g}h | {tournament['status']}{archived}"
+            f"{discord_time_display(tournament['datetime'], tournament['timezone'])}\n"
+            f"Duration: {tournament['duration_hours']:g}h\n"
+            f"Status: {tournament['status']}{archived}\n"
+            f"-# Event ID: {self.format_public_id(tournament)}"
         )
 
     def build_tournament_created_message(self, tournament: dict, event_url: Optional[str] = None) -> str:
-        message = f"**{self.tournament_event_name(tournament['tournament_name'])}**\n"
-        message += f"**Event ID:** {self.format_public_id(tournament)}\n"
+        message = f"{EVENT_DIVIDER}\n"
+        message += f"**{self.tournament_event_name(tournament['tournament_name'])}**\n"
         message += f"**Time:** {discord_time_display(tournament['datetime'], tournament['timezone'])}\n"
         message += f"**Duration:** {tournament['duration_hours']:g} hour(s)"
         if event_url:
             message += f"\n**Event Link:** {event_url}"
+        message += f"\n-# Event ID: {self.format_public_id(tournament)}"
+        message += f"\n{EVENT_DIVIDER}"
         return message
 
     async def post_tournament_created_message(self, guild: discord.Guild, fallback_channel, tournament: dict, event_url: Optional[str] = None):
@@ -355,7 +362,7 @@ class TournamentCog(commands.Cog):
     ):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             guild = interaction.guild
             if not guild:
@@ -400,9 +407,15 @@ class TournamentCog(commands.Cog):
             target_channel = self.get_tournament_event_channel(guild)
             if target_channel:
                 await self.post_tournament_created_message(guild, interaction.channel, created_tournament, scheduled_event.url)
-                await interaction.followup.send(f"Tournament Event ID {self.format_public_id(event_database_id)} posted in {target_channel.mention}.")
+                await interaction.followup.send(
+                    f"Tournament Event ID {self.format_public_id(event_database_id)} posted in {target_channel.mention}.",
+                    ephemeral=True,
+                )
             else:
-                await interaction.followup.send(self.build_tournament_created_message(created_tournament, scheduled_event.url))
+                await interaction.followup.send(
+                    self.build_tournament_created_message(created_tournament, scheduled_event.url),
+                    ephemeral=True,
+                )
         except ValueError as e:
             await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
         except discord.Forbidden:
@@ -434,7 +447,7 @@ class TournamentCog(commands.Cog):
 
         tournaments = self.db.get_all_tournaments(guild.id, include_completed=include_completed, include_archived=include_archived)
         if not tournaments:
-            await interaction.followup.send("No tournament events scheduled.")
+            await interaction.followup.send("No tournament events scheduled.", ephemeral=True)
             return
 
         view = TournamentPageView(self, tournaments, "Tournament Schedule")
@@ -467,7 +480,7 @@ class TournamentCog(commands.Cog):
             include_archived=include_archived,
         )
         if not tournaments:
-            await interaction.followup.send(f"No tournament events scheduled in the next {days} day(s).")
+            await interaction.followup.send(f"No tournament events scheduled in the next {days} day(s).", ephemeral=True)
             return
 
         view = TournamentPageView(self, tournaments, f"Upcoming Tournament Events ({days} days)")
@@ -479,7 +492,7 @@ class TournamentCog(commands.Cog):
     async def tournament_status(self, interaction: discord.Interaction, event_id: str, status: str):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             guild = interaction.guild
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -492,7 +505,10 @@ class TournamentCog(commands.Cog):
             status = self.normalize_status(status)
             self.db.update_tournament(guild.id, event_database_id, status=status)
             updated = self.db.get_tournament(guild.id, event_database_id)
-            await interaction.followup.send(f"**Tournament Event Status Updated**\n{self.build_tournament_line(updated)}")
+            await interaction.followup.send(
+                f"**Tournament Event Status Updated**\n{self.build_tournament_line(updated)}",
+                ephemeral=True,
+            )
         except Exception as e:
             if interaction.response.is_done():
                 await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
@@ -587,7 +603,7 @@ class TournamentCog(commands.Cog):
     async def tournament_delete(self, interaction: discord.Interaction, event_id: str):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             guild = interaction.guild
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -600,7 +616,10 @@ class TournamentCog(commands.Cog):
             if tournament["discord_event_id"]:
                 await self.delete_discord_event(guild, tournament["discord_event_id"])
             self.db.delete_tournament(guild.id, event_database_id)
-            await interaction.followup.send(f"Tournament Event ID {self.format_public_id(event_database_id)} deleted.")
+            await interaction.followup.send(
+                f"Tournament Event ID {self.format_public_id(event_database_id)} deleted.",
+                ephemeral=True,
+            )
         except Exception as e:
             if interaction.response.is_done():
                 await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)

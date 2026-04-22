@@ -1,4 +1,5 @@
 import re
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -29,6 +30,7 @@ BRACKET_CHOICES = [
     app_commands.Choice(name="Lower", value="Lower"),
 ]
 STATUS_CHOICES = [app_commands.Choice(name=status, value=status) for status in MATCH_STATUSES]
+EVENT_DIVIDER = "------------------------------"
 
 
 class MRCEditModal(discord.ui.Modal):
@@ -122,7 +124,8 @@ class MRCEditModal(discord.ui.Modal):
 
             updated = self.cog.db.get_mrc_match(self.guild_id, match["id"])
             await interaction.response.send_message(
-                f"**Event Updated**\n{self.cog.build_match_line(updated)}"
+                f"**Event Updated**\n{self.cog.build_match_line(updated)}",
+                ephemeral=True,
             )
         except Exception as e:
             await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
@@ -151,7 +154,11 @@ class MRCMatchPageView(discord.ui.View):
         start = self.page * self.page_size
         end = start + self.page_size
         for match in self.matches[start:end]:
-            embed.add_field(name=f"Event ID {self.cog.format_public_id(match)}", value=self.cog.build_match_line(match), inline=False)
+            embed.add_field(
+                name=self.cog.build_mrc_display_title(match),
+                value=self.cog.build_match_line(match),
+                inline=False,
+            )
         return embed
 
     def update_buttons(self):
@@ -457,17 +464,21 @@ class MRCCog(commands.Cog):
     def build_match_line(self, match: dict) -> str:
         archived = " | Archived" if match.get("archived") else ""
         return (
-            f"`Event ID {self.format_public_id(match)}` {discord_time_display(match['datetime'], match['timezone'])}\n"
-            f"{self.build_mrc_display_title(match)} | {match['duration_hours']:g}h | {match['status']}{archived}"
+            f"{discord_time_display(match['datetime'], match['timezone'])}\n"
+            f"Duration: {match['duration_hours']:g}h\n"
+            f"Status: {match['status']}{archived}\n"
+            f"-# Event ID: {self.format_public_id(match)}"
         )
 
     def build_mrc_created_message(self, match: dict, event_url: Optional[str] = None) -> str:
-        message = f"**{self.build_mrc_display_title(match)}**\n"
-        message += f"**Event ID:** {self.format_public_id(match)}\n"
+        message = f"{EVENT_DIVIDER}\n"
+        message += f"**{self.build_mrc_display_title(match)}**\n"
         message += f"**Time:** {discord_time_display(match['datetime'], match['timezone'])}\n"
         message += f"**Duration:** {match['duration_hours']:g} hour(s)"
         if event_url:
             message += f"\n**Event Link:** {event_url}"
+        message += f"\n-# Event ID: {self.format_public_id(match)}"
+        message += f"\n{EVENT_DIVIDER}"
         return message
 
     async def post_mrc_created_message(
@@ -537,7 +548,7 @@ class MRCCog(commands.Cog):
         """Import multiple MRC matches from bulk text."""
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             guild = interaction.guild
             if not guild:
@@ -600,7 +611,7 @@ class MRCCog(commands.Cog):
                 if len(failed) > 5:
                     response += f"... and {len(failed) - 5} more\n"
 
-            await interaction.followup.send(response)
+            await interaction.followup.send(response, ephemeral=True)
         except Exception as e:
             await self.send_error(interaction, e)
 
@@ -630,7 +641,7 @@ class MRCCog(commands.Cog):
         """Add a single MRC match."""
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             guild = interaction.guild
             if not guild:
@@ -680,10 +691,14 @@ class MRCCog(commands.Cog):
                     created_match,
                     self.build_discord_event_url(guild, event_id),
                 )
-                await interaction.followup.send(f"MRC Event ID {self.format_public_id(match_id)} posted in {target_channel.mention}.")
+                await interaction.followup.send(
+                    f"MRC Event ID {self.format_public_id(match_id)} posted in {target_channel.mention}.",
+                    ephemeral=True,
+                )
             else:
                 await interaction.followup.send(
-                    self.build_mrc_created_message(created_match, self.build_discord_event_url(guild, event_id))
+                    self.build_mrc_created_message(created_match, self.build_discord_event_url(guild, event_id)),
+                    ephemeral=True,
                 )
         except Exception as e:
             await self.send_error(interaction, e)
@@ -793,7 +808,7 @@ class MRCCog(commands.Cog):
                             "or `4/20/26 3PM EST Rounds 7-9`.",
                             ephemeral=True,
                         )
-                except discord.errors.WaitTimeoutError:
+                except asyncio.TimeoutError:
                     await self.cleanup_session_messages(session_messages)
                     await interaction.followup.send("Session timeout. Ending session.", ephemeral=True)
                     break
@@ -824,7 +839,7 @@ class MRCCog(commands.Cog):
             include_archived=include_archived,
         )
         if not matches:
-            await interaction.followup.send("No MRC matches scheduled.")
+            await interaction.followup.send("No MRC matches scheduled.", ephemeral=True)
             return
 
         view = MRCMatchPageView(self, matches, "MRC Schedule")
@@ -857,7 +872,7 @@ class MRCCog(commands.Cog):
             include_archived=include_archived,
         )
         if not matches:
-            await interaction.followup.send(f"No MRC matches scheduled in the next {days} day(s).")
+            await interaction.followup.send(f"No MRC matches scheduled in the next {days} day(s).", ephemeral=True)
             return
 
         view = MRCMatchPageView(self, matches, f"Upcoming MRC Events ({days} days)")
@@ -874,7 +889,7 @@ class MRCCog(commands.Cog):
     ):
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             guild = interaction.guild
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -898,7 +913,7 @@ class MRCCog(commands.Cog):
                     updated["id"],
                     updated.get("season", 7),
                 )
-            await interaction.followup.send(f"**Event Status Updated**\n{self.build_match_line(updated)}")
+            await interaction.followup.send(f"**Event Status Updated**\n{self.build_match_line(updated)}", ephemeral=True)
         except Exception as e:
             await self.send_error(interaction, e)
 
@@ -997,7 +1012,7 @@ class MRCCog(commands.Cog):
         """Delete an MRC match and its Discord event."""
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             guild = interaction.guild
             if not guild:
@@ -1014,7 +1029,7 @@ class MRCCog(commands.Cog):
                 await self.delete_discord_event(guild, match["discord_event_id"])
 
             self.db.delete_mrc_match(guild.id, event_database_id)
-            await interaction.followup.send(f"Event ID {self.format_public_id(event_database_id)} deleted.")
+            await interaction.followup.send(f"Event ID {self.format_public_id(event_database_id)} deleted.", ephemeral=True)
         except Exception as e:
             await self.send_error(interaction, e)
 

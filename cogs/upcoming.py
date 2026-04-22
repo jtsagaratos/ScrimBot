@@ -27,7 +27,10 @@ class UpcomingCog(commands.Cog):
         tournaments = self.db.get_upcoming_tournaments(guild.id, days=days)
 
         if not matches and not scrims and not tournaments:
-            await interaction.followup.send(f"No MRC matches, scrims, or tournaments scheduled in the next {days} day(s).")
+            await interaction.followup.send(
+                f"No MRC matches, scrims, or tournaments scheduled in the next {days} day(s).",
+                ephemeral=True,
+            )
             return
 
         embed = discord.Embed(
