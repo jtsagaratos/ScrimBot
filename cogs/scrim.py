@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 import discord
 import pytz
@@ -175,7 +176,7 @@ class ScrimCog(commands.Cog):
 
     def get_scrim_ping_mentions(self, guild: discord.Guild) -> str:
         mentions = []
-        for role_id in self.db.get_scrim_ping_roles(guild.id):
+        for role_id in self.db.get_reminder_roles(guild.id):
             role = guild.get_role(role_id)
             if role:
                 mentions.append(role.mention)
@@ -331,7 +332,7 @@ class ScrimCog(commands.Cog):
                 break
         return choices
 
-    scrim_group = app_commands.Group(name="scrim", description="Scrim scheduling and settings")
+    scrim_group = app_commands.Group(name="scrims", description="Scrim scheduling and settings")
 
     @scrim_group.command(name="create", description="Create a scrim event against another team")
     @app_commands.rename(
@@ -643,7 +644,7 @@ class ScrimCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def scrim_reminder_task(self):
         try:
-            scrims = self.db.get_scrims_needing_30_minute_reminder()
+            scrims = self.db.get_scrims_needing_30_minute_reminder(60)
             for scrim in scrims:
                 if scrim["status"] in {"Completed", "Cancelled"}:
                     self.db.mark_scrim_30_minute_reminder_sent(scrim["guild_id"], scrim["id"])
@@ -651,6 +652,12 @@ class ScrimCog(commands.Cog):
 
                 guild = self.bot.get_guild(scrim["guild_id"])
                 if not guild:
+                    continue
+
+                settings = self.db.get_guild_settings(guild.id)
+                reminder_minutes = settings.get("reminder_minutes", 30)
+                scrim_dt = parse_stored_datetime(scrim["datetime"])
+                if scrim_dt > datetime.now(timezone.utc) + timedelta(minutes=reminder_minutes):
                     continue
 
                 channel = self.get_scrim_reminder_channel(guild)
@@ -669,7 +676,7 @@ class ScrimCog(commands.Cog):
                 if pings:
                     message += f"{pings}\n"
                 message += (
-                    f"**Scrim starts in 30 minutes**\n"
+                    f"**Scrim starts in {reminder_minutes} minutes**\n"
                     f"**Event ID:** {scrim['id']}\n"
                     f"**Event:** {self.scrim_event_name(scrim['team_name'])}\n"
                     f"**Time:** {discord_time_display(scrim['datetime'], scrim['timezone'])}\n"

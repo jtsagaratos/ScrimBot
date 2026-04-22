@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 import discord
@@ -1028,7 +1028,7 @@ class MRCCog(commands.Cog):
     async def reminder_task(self):
         """Check for MRC matches starting within 30 minutes and send one reminder."""
         try:
-            matches = self.db.get_matches_needing_30_minute_reminder()
+            matches = self.db.get_matches_needing_30_minute_reminder(60)
             for match in matches:
                 if match["status"] in {"Completed", "Cancelled"}:
                     self.db.mark_30_minute_reminder_sent(match["guild_id"], match["id"])
@@ -1036,6 +1036,12 @@ class MRCCog(commands.Cog):
 
                 guild = self.bot.get_guild(match["guild_id"])
                 if not guild:
+                    continue
+
+                settings = self.db.get_guild_settings(guild.id)
+                reminder_minutes = settings.get("reminder_minutes", 30)
+                match_dt = parse_stored_datetime(match["datetime"])
+                if match_dt > datetime.now(timezone.utc) + timedelta(minutes=reminder_minutes):
                     continue
 
                 channel = self.get_reminder_channel(guild)
@@ -1054,7 +1060,7 @@ class MRCCog(commands.Cog):
                 if pings:
                     message += f"{pings}\n"
                 message += (
-                    f"**MRC match starts in 30 minutes**\n"
+                    f"**MRC match starts in {reminder_minutes} minutes**\n"
                     f"**Time:** {discord_time_display(match['datetime'], match['timezone'])}\n"
                     f"**Season:** {match.get('season', 7)}\n"
                     f"**Round:** {match['round_group']}\n"

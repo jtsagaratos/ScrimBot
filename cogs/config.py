@@ -127,12 +127,12 @@ class ManagerRoleSelect(discord.ui.Select):
         )
 
 
-class MRCReminderRoleSelect(discord.ui.Select):
+class ReminderRoleSelect(discord.ui.Select):
     def __init__(self, cog, guild: discord.Guild):
         self.cog = cog
-        options = build_role_toggle_options(guild, cog.db.get_reminder_roles(guild.id), "MRC reminder roles")
+        options = build_role_toggle_options(guild, cog.db.get_reminder_roles(guild.id), "reminder roles")
         super().__init__(
-            placeholder="Check MRC reminder ping roles",
+            placeholder="Check reminder roles for MRC, scrims, and tournaments",
             min_values=0,
             max_values=min(25, len(options)),
             options=options,
@@ -151,24 +151,28 @@ class MRCReminderRoleSelect(discord.ui.Select):
         )
 
 
-class ScrimPingRoleSelect(discord.ui.Select):
+class ReminderLeadSelect(discord.ui.Select):
     def __init__(self, cog, guild: discord.Guild):
         self.cog = cog
-        options = build_role_toggle_options(guild, cog.db.get_scrim_ping_roles(guild.id), "scrim ping roles")
+        current_minutes = cog.db.get_guild_settings(guild.id).get("reminder_minutes", 30)
+        options = []
+        for minutes in (15, 30, 45, 60):
+            label = "1 hour" if minutes == 60 else f"{minutes} minutes"
+            options.append(discord.SelectOption(
+                label=label,
+                value=str(minutes),
+                default=minutes == current_minutes,
+            ))
         super().__init__(
-            placeholder="Check scrim ping roles",
-            min_values=0,
-            max_values=min(25, len(options)),
+            placeholder="Choose reminder lead time",
+            min_values=1,
+            max_values=1,
             options=options,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        selected_ids = {int(value) for value in self.values if value != "none"}
-        current_ids = set(self.cog.db.get_scrim_ping_roles(interaction.guild.id))
-        for role_id in current_ids - selected_ids:
-            self.cog.db.remove_scrim_ping_role(interaction.guild.id, role_id)
-        for role_id in selected_ids - current_ids:
-            self.cog.db.add_scrim_ping_role(interaction.guild.id, role_id)
+        reminder_minutes = int(self.values[0])
+        self.cog.db.update_guild_settings(interaction.guild.id, reminder_minutes=reminder_minutes)
         await interaction.response.edit_message(
             content=self.cog.build_setup_status(interaction.guild),
             view=SetupRolesView(self.cog, interaction.guild),
@@ -179,7 +183,7 @@ class ReminderChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, cog):
         self.cog = cog
         super().__init__(
-            placeholder="Choose reminder channel for MRC and scrims",
+            placeholder="Choose reminder channel for MRC, scrims, and tournaments",
             channel_types=[discord.ChannelType.text],
             min_values=1,
             max_values=1,
@@ -266,7 +270,7 @@ class IgniteChannelSelect(discord.ui.ChannelSelect):
         self.cog.get_ignite_cog().update_settings(interaction.guild.id, channel_id=str(channel.id))
         await interaction.response.edit_message(
             content=self.cog.build_setup_status(interaction.guild),
-            view=SetupChannelsView(self.cog),
+            view=SetupIgniteView(self.cog),
         )
 
 
@@ -334,8 +338,8 @@ class SetupRolesView(discord.ui.View):
         super().__init__(timeout=600)
         self.cog = cog
         self.add_item(ManagerRoleSelect(cog, guild))
-        self.add_item(MRCReminderRoleSelect(cog, guild))
-        self.add_item(ScrimPingRoleSelect(cog, guild))
+        self.add_item(ReminderRoleSelect(cog, guild))
+        self.add_item(ReminderLeadSelect(cog, guild))
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -463,12 +467,12 @@ class ConfigCog(commands.Cog):
         response += "Use the buttons and menus below to configure this server.\n\n"
         response += f"**Default Timezone:** `{settings['timezone']}`\n"
         response += f"**Manager Roles:** {self.format_roles(guild, self.db.get_manager_roles(guild.id))}\n"
-        response += f"**Reminder Channel:** {reminder_channel.mention if reminder_channel else 'Auto'}\n"
+        response += f"**MRC/Scrim/Tournament Reminder Channel:** {reminder_channel.mention if reminder_channel else 'Auto'}\n"
+        response += f"**Reminder Lead Time:** {settings.get('reminder_minutes', 30)} minutes\n"
         response += f"**MRC Event Channel:** {mrc_event_channel.mention if mrc_event_channel else 'Command channel'}\n"
         response += f"**Scrim Event Channel:** {scrim_event_channel.mention if scrim_event_channel else 'Command channel'}\n"
         response += f"**Tournament Event Channel:** {tournament_event_channel.mention if tournament_event_channel else 'Command channel'}\n"
-        response += f"**MRC Reminder Roles:** {self.format_roles(guild, self.db.get_reminder_roles(guild.id))}\n"
-        response += f"**Scrim Ping Roles:** {self.format_roles(guild, self.db.get_scrim_ping_roles(guild.id))}\n"
+        response += f"**Reminder Roles:** {self.format_roles(guild, self.db.get_reminder_roles(guild.id))}\n"
         response += f"**Ignite Channel:** {ignite_channel.mention if ignite_channel else 'Not set'}\n"
         response += f"**Ignite Auto-posting:** {'Enabled' if ignite_settings['enabled'] else 'Disabled'}\n"
         response += f"**Ignite Tracked Team:** {ignite_settings['tracked_team'] or 'All teams'}\n"

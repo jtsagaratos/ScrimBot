@@ -59,13 +59,18 @@ class DatabaseTests(TempDatabaseTestCase):
         self.assertFalse(self.db.add_manager_role(200, 12345))
         self.assertEqual(set(self.db.get_manager_roles(200)), {12345, 67890})
 
-    def test_scrim_ping_roles_can_store_multiple_roles(self):
-        self.assertTrue(self.db.add_scrim_ping_role(201, 111))
-        self.assertTrue(self.db.add_scrim_ping_role(201, 222))
-        self.assertFalse(self.db.add_scrim_ping_role(201, 111))
-        self.assertEqual(set(self.db.get_scrim_ping_roles(201)), {111, 222})
-        self.assertTrue(self.db.remove_scrim_ping_role(201, 111))
-        self.assertEqual(self.db.get_scrim_ping_roles(201), [222])
+    def test_reminder_roles_can_store_multiple_roles(self):
+        self.assertTrue(self.db.add_reminder_role(201, 111))
+        self.assertTrue(self.db.add_reminder_role(201, 222))
+        self.assertFalse(self.db.add_reminder_role(201, 111))
+        self.assertEqual(set(self.db.get_reminder_roles(201)), {111, 222})
+        self.assertTrue(self.db.remove_reminder_role(201, 111))
+        self.assertEqual(self.db.get_reminder_roles(201), [222])
+
+    def test_legacy_scrim_ping_roles_migrate_to_reminder_roles(self):
+        self.db.add_scrim_ping_role(211, 333)
+        DatabaseManager(self.path)
+        self.assertIn(333, self.db.get_reminder_roles(211))
 
     def test_event_duration_is_stored_for_matches_and_scrims(self):
         dt = to_utc_iso(datetime.now(timezone.utc) + timedelta(days=1))
@@ -186,6 +191,67 @@ class DatabaseTests(TempDatabaseTestCase):
 
         with_archived = self.db.get_all_tournaments(207, include_completed=True, include_archived=True)
         self.assertEqual({event["id"] for event in with_archived}, {scheduled_id, completed_id})
+
+    def test_tournament_due_reminders(self):
+        now = datetime.now(timezone.utc)
+        due_id = self.db.add_tournament(
+            208,
+            "Due Tournament",
+            to_utc_iso(now + timedelta(minutes=20)),
+            "UTC",
+            "333",
+        )
+        later_id = self.db.add_tournament(
+            208,
+            "Later Tournament",
+            to_utc_iso(now + timedelta(hours=2)),
+            "UTC",
+            "444",
+        )
+
+        due_tournaments = self.db.get_tournaments_needing_30_minute_reminder()
+        self.assertIn(due_id, {event["id"] for event in due_tournaments})
+        self.assertNotIn(later_id, {event["id"] for event in due_tournaments})
+
+        self.db.mark_tournament_30_minute_reminder_sent(208, due_id)
+        due_tournaments = self.db.get_tournaments_needing_30_minute_reminder()
+        self.assertNotIn(due_id, {event["id"] for event in due_tournaments})
+
+    def test_reminder_lead_time_setting(self):
+        self.db.update_guild_settings(209, reminder_minutes=45)
+        settings = self.db.get_guild_settings(209)
+        self.assertEqual(settings["reminder_minutes"], 45)
+
+    def test_reminder_due_queries_accept_custom_window(self):
+        now = datetime.now(timezone.utc)
+        mrc_id = self.db.add_mrc_match(
+            210,
+            to_utc_iso(now + timedelta(minutes=40)),
+            "Rounds 1-3",
+            "Upper",
+        )
+        scrim_id = self.db.add_scrim(
+            210,
+            "Team",
+            None,
+            to_utc_iso(now + timedelta(minutes=40)),
+            "UTC",
+            "111",
+        )
+        tournament_id = self.db.add_tournament(
+            210,
+            "Tournament",
+            to_utc_iso(now + timedelta(minutes=40)),
+            "UTC",
+            "222",
+        )
+
+        self.assertNotIn(mrc_id, {event["id"] for event in self.db.get_matches_needing_30_minute_reminder(30)})
+        self.assertIn(mrc_id, {event["id"] for event in self.db.get_matches_needing_30_minute_reminder(45)})
+        self.assertNotIn(scrim_id, {event["id"] for event in self.db.get_scrims_needing_30_minute_reminder(30)})
+        self.assertIn(scrim_id, {event["id"] for event in self.db.get_scrims_needing_30_minute_reminder(45)})
+        self.assertNotIn(tournament_id, {event["id"] for event in self.db.get_tournaments_needing_30_minute_reminder(30)})
+        self.assertIn(tournament_id, {event["id"] for event in self.db.get_tournaments_needing_30_minute_reminder(45)})
 
     def test_scrim_reminder_settings_and_due_queries(self):
         now = datetime.now(timezone.utc)

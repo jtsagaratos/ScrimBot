@@ -65,6 +65,7 @@ class DatabaseManager:
                 mrc_event_channel_id INTEGER,
                 scrim_event_channel_id INTEGER,
                 tournament_event_channel_id INTEGER,
+                reminder_minutes INTEGER NOT NULL DEFAULT 30,
                 manager_role_id INTEGER,
                 timezone TEXT NOT NULL DEFAULT 'US/Eastern',
                 created_at TEXT NOT NULL,
@@ -116,6 +117,12 @@ class DatabaseManager:
             )
         ''')
 
+        cursor.execute('''
+            INSERT OR IGNORE INTO reminder_roles (guild_id, role_id, created_at)
+            SELECT guild_id, role_id, created_at
+            FROM scrim_ping_roles
+        ''')
+
         self._ensure_column(cursor, "mrc_matches", "discord_event_id", "TEXT")
         self._ensure_column(cursor, "mrc_matches", "reminder_sent_30", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(cursor, "mrc_matches", "timezone", "TEXT NOT NULL DEFAULT 'US/Eastern'")
@@ -131,6 +138,7 @@ class DatabaseManager:
         self._ensure_column(cursor, "guild_settings", "mrc_event_channel_id", "INTEGER")
         self._ensure_column(cursor, "guild_settings", "scrim_event_channel_id", "INTEGER")
         self._ensure_column(cursor, "guild_settings", "tournament_event_channel_id", "INTEGER")
+        self._ensure_column(cursor, "guild_settings", "reminder_minutes", "INTEGER NOT NULL DEFAULT 30")
         self._ensure_column(cursor, "guild_settings", "manager_role_id", "INTEGER")
 
         conn.commit()
@@ -214,7 +222,8 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 SELECT guild_id, reminder_channel_id, scrim_reminder_channel_id,
-                       mrc_event_channel_id, scrim_event_channel_id, tournament_event_channel_id, manager_role_id,
+                       mrc_event_channel_id, scrim_event_channel_id, tournament_event_channel_id,
+                       reminder_minutes, manager_role_id,
                        timezone, created_at, updated_at
                 FROM guild_settings
                 WHERE guild_id = ?
@@ -228,10 +237,11 @@ class DatabaseManager:
                     'mrc_event_channel_id': row[3],
                     'scrim_event_channel_id': row[4],
                     'tournament_event_channel_id': row[5],
-                    'manager_role_id': row[6],
-                    'timezone': row[7],
-                    'created_at': row[8],
-                    'updated_at': row[9],
+                    'reminder_minutes': row[6],
+                    'manager_role_id': row[7],
+                    'timezone': row[8],
+                    'created_at': row[9],
+                    'updated_at': row[10],
                 }
 
             now = self._utc_now_iso()
@@ -247,6 +257,7 @@ class DatabaseManager:
                 'mrc_event_channel_id': None,
                 'scrim_event_channel_id': None,
                 'tournament_event_channel_id': None,
+                'reminder_minutes': 30,
                 'manager_role_id': None,
                 'timezone': "US/Eastern",
                 'created_at': now,
@@ -262,6 +273,7 @@ class DatabaseManager:
             'mrc_event_channel_id',
             'scrim_event_channel_id',
             'tournament_event_channel_id',
+            'reminder_minutes',
             'manager_role_id',
             'timezone',
         }
@@ -606,7 +618,7 @@ class DatabaseManager:
                 matches.append(match)
         return matches
 
-    def get_matches_needing_30_minute_reminder(self) -> List[Dict]:
+    def get_matches_needing_30_minute_reminder(self, reminder_minutes: int = 30) -> List[Dict]:
         """Get future matches due for a one-time 30-minute reminder."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -625,7 +637,7 @@ class DatabaseManager:
             conn.close()
 
         now = datetime.now(timezone.utc)
-        cutoff = now + timedelta(minutes=30)
+        cutoff = now + timedelta(minutes=reminder_minutes)
         matches = []
         for row in rows:
             match = self._row_to_match(row)
@@ -812,7 +824,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_scrims_needing_30_minute_reminder(self) -> List[Dict]:
+    def get_scrims_needing_30_minute_reminder(self, reminder_minutes: int = 30) -> List[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -830,7 +842,7 @@ class DatabaseManager:
             conn.close()
 
         now = datetime.now(timezone.utc)
-        cutoff = now + timedelta(minutes=30)
+        cutoff = now + timedelta(minutes=reminder_minutes)
         scrims = []
         for row in rows:
             scrim = self._row_to_scrim(row)
@@ -996,7 +1008,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_tournaments_needing_30_minute_reminder(self) -> List[Dict]:
+    def get_tournaments_needing_30_minute_reminder(self, reminder_minutes: int = 30) -> List[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -1014,7 +1026,7 @@ class DatabaseManager:
             conn.close()
 
         now = datetime.now(timezone.utc)
-        cutoff = now + timedelta(minutes=30)
+        cutoff = now + timedelta(minutes=reminder_minutes)
         tournaments = []
         for row in rows:
             tournament = self._row_to_tournament(row)

@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 import discord
 import pytz
@@ -198,6 +199,14 @@ class TournamentCog(commands.Cog):
                 return channel
         return None
 
+    def get_reminder_role_mentions(self, guild: discord.Guild) -> str:
+        mentions = []
+        for role_id in self.db.get_reminder_roles(guild.id):
+            role = guild.get_role(role_id)
+            if role:
+                mentions.append(role.mention)
+        return " ".join(mentions)
+
     def get_tournament_event_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
         settings = self.db.get_guild_settings(guild.id)
         configured_channel_id = settings.get("tournament_event_channel_id")
@@ -321,7 +330,7 @@ class TournamentCog(commands.Cog):
                 break
         return choices
 
-    tournament_group = app_commands.Group(name="tournament", description="Tournament scheduling and settings")
+    tournament_group = app_commands.Group(name="tournaments", description="Tournament scheduling and settings")
 
     @tournament_group.command(name="create", description="Create a tournament event")
     @app_commands.rename(
@@ -605,7 +614,7 @@ class TournamentCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def tournament_reminder_task(self):
         try:
-            tournaments = self.db.get_tournaments_needing_30_minute_reminder()
+            tournaments = self.db.get_tournaments_needing_30_minute_reminder(60)
             for tournament in tournaments:
                 if tournament["status"] in {"Completed", "Cancelled"}:
                     self.db.mark_tournament_30_minute_reminder_sent(tournament["guild_id"], tournament["id"])
@@ -613,6 +622,12 @@ class TournamentCog(commands.Cog):
 
                 guild = self.bot.get_guild(tournament["guild_id"])
                 if not guild:
+                    continue
+
+                settings = self.db.get_guild_settings(guild.id)
+                reminder_minutes = settings.get("reminder_minutes", 30)
+                tournament_dt = parse_stored_datetime(tournament["datetime"])
+                if tournament_dt > datetime.now(timezone.utc) + timedelta(minutes=reminder_minutes):
                     continue
 
                 channel = self.get_reminder_channel(guild)
@@ -626,8 +641,12 @@ class TournamentCog(commands.Cog):
                     if event:
                         event_url = event.url
 
-                message = (
-                    f"**Tournament starts in 30 minutes**\n"
+                pings = self.get_reminder_role_mentions(guild)
+                message = ""
+                if pings:
+                    message += f"{pings}\n"
+                message += (
+                    f"**Tournament starts in {reminder_minutes} minutes**\n"
                     f"**Event ID:** {self.format_public_id(tournament)}\n"
                     f"**Event:** {self.tournament_event_name(tournament['tournament_name'])}\n"
                     f"**Time:** {discord_time_display(tournament['datetime'], tournament['timezone'])}\n"
@@ -637,7 +656,7 @@ class TournamentCog(commands.Cog):
                 if event_url:
                     message += f"\n**Event Link:** {event_url}"
 
-                await channel.send(message)
+                await channel.send(message, allowed_mentions=discord.AllowedMentions(roles=True))
                 self.db.mark_tournament_30_minute_reminder_sent(tournament["guild_id"], tournament["id"])
         except Exception as e:
             print(f"Error in tournament reminder task: {e}")

@@ -6,7 +6,7 @@ ScrimBot is a Discord bot for scrims, MRC event scheduling, Ignite result tracki
 
 - Create scrim events against plain-text opponent names.
 - Add, import, edit, view, archive, and delete MRC events.
-- Send 30-minute MRC and scrim reminders to configured channels.
+- Send 30-minute MRC, scrim, and tournament reminders to a configured channel.
 - Ping configured reminder roles.
 - Show upcoming MRC events and scrims.
 - Track Ignite results from Liquipedia and auto-post new results.
@@ -103,9 +103,9 @@ From there you can configure:
 
 - Default timezone
 - Manager roles
-- Shared reminder channel for MRC and scrims
+- Shared reminder channel and lead time for MRC, scrims, and tournaments
 - MRC event posting channel
-- MRC reminder ping roles
+- Reminder roles for MRC, scrims, and tournaments
 - Scrim/tournament event posting channel
 - Scrim ping roles
 - Ignite result channel
@@ -129,7 +129,9 @@ You can also use abbreviations like `EST`, `PST`, `UTC`, `MT`, or full IANA name
 
 ### 3. Set The Shared Reminder Channel
 
-Use `/setup`, choose **Channels**, then choose the reminder channel. Both MRC and scrim 30-minute reminders use this channel.
+Use `/setup`, choose **Channels**, then choose the reminder channel. MRC, scrim, and tournament 30-minute reminders use this channel.
+
+To change when reminders are sent, use `/setup`, choose **Roles**, then choose the reminder lead time. Options are 15 minutes, 30 minutes, 45 minutes, or 1 hour.
 
 ### 4. Set Event Posting Channels
 
@@ -137,13 +139,7 @@ Use `/setup`, choose **Channels**, then choose the MRC event channel, scrim even
 
 ### 5. Add Reminder Ping Roles
 
-Use `/setup`, choose **Roles**, then use the **Check MRC reminder ping roles** menu. Checked roles receive reminders; unchecked roles are removed.
-
-Scrim pings are configured separately:
-
-Use `/setup`, choose **Roles**, then use the **Check scrim ping roles** menu. Checked roles receive scrim pings/reminders; unchecked roles are removed.
-
-The scrim ping roles are also used for 30-minute scrim reminders.
+Use `/setup`, choose **Roles**, then use the **Check reminder roles** menu. Checked roles receive MRC, scrim, and tournament reminders; unchecked roles are removed.
 
 ### 6. Set Up Ignite Results
 
@@ -176,13 +172,13 @@ This checks the database, background tasks, Ignite source reachability, and Disc
 The team name is plain text. The opponent does not need a Discord role.
 
 ```text
-/scrim create team:"Team1" date_time:"4/22/26 4pm EST" duration_hrs:2
+/scrims create team:"Team1" date_time:"4/22/26 4pm EST" duration_hrs:2
 ```
 
 With a timezone override:
 
 ```text
-/scrim create team:"Team1" date_time:"April 22 4:00 PM" duration_hrs:2 timezone:"America/Denver"
+/scrims create team:"Team1" date_time:"April 22 4:00 PM" duration_hrs:2 timezone:"America/Denver"
 ```
 
 The bot creates a Discord Scheduled Event with the required duration and stores the scrim for `/upcoming`.
@@ -197,10 +193,10 @@ Edit a scrim later:
 Manage scrims like MRC events:
 
 ```text
-/scrim view
-/scrim upcoming days:14
-/scrim status event_id:S1 status:"Completed"
-/scrim delete event_id:S1
+/scrims view
+/scrims upcoming days:14
+/scrims status event_id:S1 status:"Completed"
+/scrims delete event_id:S1
 ```
 
 Set roles to ping for scrim reminders:
@@ -209,14 +205,14 @@ Set roles to ping for scrim reminders:
 /setup
 ```
 
-Choose **Roles**, then check the scrim ping roles.
+Choose **Roles**, then check the shared reminder roles.
 
 ### Schedule One Tournament
 
 Tournament names are plain text and use `T` event IDs.
 
 ```text
-/tournament create name:"Ignite Qualifier" date_time:"4/24/26 6pm EST" duration_hrs:3
+/tournaments create name:"Ignite Qualifier" date_time:"4/24/26 6pm EST" duration_hrs:3
 ```
 
 Edit a tournament later:
@@ -228,10 +224,10 @@ Edit a tournament later:
 Manage tournaments:
 
 ```text
-/tournament view
-/tournament upcoming days:14
-/tournament status event_id:T1 status:"Completed"
-/tournament delete event_id:T1
+/tournaments view
+/tournaments upcoming days:14
+/tournaments status event_id:T1 status:"Completed"
+/tournaments delete event_id:T1
 ```
 
 ### Add One MRC Event
@@ -422,7 +418,7 @@ In Discord, the `<t:...>` parts render as real local times.
 
 ### Setup
 
-Use `/setup` first. It opens an interactive setup panel for timezone, manager roles, the shared reminder channel, MRC event channel, scrim event channel, tournament event channel, MRC reminder roles, scrim ping roles, and Ignite posting settings.
+Use `/setup` first. It opens an interactive setup panel for timezone, manager roles, the shared reminder channel, MRC event channel, scrim event channel, tournament event channel, reminder roles, and Ignite posting settings.
 
 | Command | What It Does |
 | --- | --- |
@@ -438,26 +434,26 @@ Use `/setup` first. It opens an interactive setup panel for timezone, manager ro
 
 | Command | What It Does |
 | --- | --- |
-| `/scrim create team date_time duration_hrs` | Creates a scrim Scheduled Event against a plain-text opponent. |
-| `/scrim view` | Shows active scrim events with pagination. |
-| `/scrim upcoming` | Shows upcoming scrim events. |
-| `/scrim status event_id status` | Sets scrim event status. |
-| `/scrim archive_completed` | Archives completed/cancelled scrim events. |
-| `/scrim repair_events` | Recreates missing Discord Scheduled Events for scrims. |
-| `/scrim delete event_id` | Deletes a scrim and its linked event. |
+| `/scrims create team date_time duration_hrs` | Creates a scrim Scheduled Event against a plain-text opponent. |
+| `/scrims view` | Shows active scrim events with pagination. |
+| `/scrims upcoming` | Shows upcoming scrim events. |
+| `/scrims status event_id status` | Sets scrim event status. |
+| `/scrims archive_completed` | Archives completed/cancelled scrim events. |
+| `/scrims repair_events` | Recreates missing Discord Scheduled Events for scrims. |
+| `/scrims delete event_id` | Deletes a scrim and its linked event. |
 | `/upcoming days:14` | Shows upcoming MRC events, scrims, and tournaments together. |
 
 ### Tournaments
 
 | Command | What It Does |
 | --- | --- |
-| `/tournament create name date_time duration_hrs` | Creates a tournament Scheduled Event. |
-| `/tournament view` | Shows active tournament events with pagination. |
-| `/tournament upcoming` | Shows upcoming tournament events. |
-| `/tournament status event_id status` | Sets tournament event status. |
-| `/tournament archive_completed` | Archives completed/cancelled tournament events. |
-| `/tournament repair_events` | Recreates missing Discord Scheduled Events for tournaments. |
-| `/tournament delete event_id` | Deletes a tournament and its linked event. |
+| `/tournaments create name date_time duration_hrs` | Creates a tournament Scheduled Event. |
+| `/tournaments view` | Shows active tournament events with pagination. |
+| `/tournaments upcoming` | Shows upcoming tournament events. |
+| `/tournaments status event_id status` | Sets tournament event status. |
+| `/tournaments archive_completed` | Archives completed/cancelled tournament events. |
+| `/tournaments repair_events` | Recreates missing Discord Scheduled Events for tournaments. |
+| `/tournaments delete event_id` | Deletes a tournament and its linked event. |
 
 ### MRC Scheduling
 
@@ -558,15 +554,15 @@ Optional:
 - timezone abbreviation or IANA timezone, such as `EST` or `America/Denver`
 - a final `Upper` or `Lower` bracket label
 
-### Scrim Pings Do Not Happen
+### Reminder Pings Do Not Happen
 
-Add at least one scrim ping role:
+Add at least one reminder role:
 
 ```text
 /setup
 ```
 
-Choose **Roles**, then check at least one scrim ping role.
+Choose **Roles**, then check at least one reminder role.
 
 ### Ignite Does Not Post
 
