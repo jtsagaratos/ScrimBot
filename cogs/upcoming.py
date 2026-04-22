@@ -14,7 +14,7 @@ class UpcomingCog(commands.Cog):
     @app_commands.command(name="upcoming", description="View upcoming MRC matches and scrims")
     @app_commands.describe(days="Number of days to include, from 1 to 90")
     async def upcoming(self, interaction: discord.Interaction, days: int = 14):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
         if not guild:
@@ -35,11 +35,13 @@ class UpcomingCog(commands.Cog):
         )
 
         for match in matches[:12]:
+            bracket = f" ({match['bracket']})" if match.get("bracket") else ""
             value = (
                 f"{discord_time_display(match['datetime'], match['timezone'])}\n"
-                f"{match['round_group']} | {match['bracket']} | {match['duration_hours']:g}h | {match['status']}"
+                f"MRC S{match.get('season', 7)} - {match['round_group']}{bracket} | "
+                f"{match['duration_hours']:g}h | {match['status']}"
             )
-            embed.add_field(name=f"MRC Event ID {match['id']}", value=value, inline=False)
+            embed.add_field(name=f"MRC Event ID M{match['id']}", value=value, inline=False)
 
         for scrim in scrims[:12]:
             event = guild.get_scheduled_event(int(scrim["discord_event_id"])) if scrim["discord_event_id"] else None
@@ -49,13 +51,13 @@ class UpcomingCog(commands.Cog):
             value += f"Against: {scrim['team_name']}"
             if event:
                 value += f"\nEvent: {event.url}"
-            embed.add_field(name=f"Scrim Event ID {scrim['id']}", value=value, inline=False)
+            embed.add_field(name=f"Scrim Event ID S{scrim['id']}", value=value, inline=False)
 
         hidden = max(0, len(matches) - 12) + max(0, len(scrims) - 12)
         if hidden:
             embed.add_field(name="More", value=f"{hidden} additional item(s) not shown.", inline=False)
 
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot):

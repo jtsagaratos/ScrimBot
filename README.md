@@ -6,7 +6,7 @@ ScrimBot is a Discord bot for scrims, MRC event scheduling, Ignite result tracki
 
 - Create scrim events against plain-text opponent names.
 - Add, import, edit, view, archive, and delete MRC events.
-- Send 30-minute MRC reminders to a configured channel.
+- Send 30-minute MRC and scrim reminders to configured channels.
 - Ping configured reminder roles.
 - Show upcoming MRC events and scrims.
 - Track Ignite results from Liquipedia and auto-post new results.
@@ -72,7 +72,9 @@ DISCORD_TOKEN=your_actual_bot_token_here
 GUILD_ID=0
 ```
 
-`GUILD_ID=0` is fine. The bot syncs slash commands globally.
+For fastest command updates while testing, set `GUILD_ID` to your Discord server ID. With `GUILD_ID=0`, the bot syncs slash commands globally, which can take longer to appear in Discord.
+
+Use `/setup` to open the interactive setup panel for channels, roles, timezone, and Ignite settings.
 
 ### Start The Bot
 
@@ -89,86 +91,77 @@ Synced X command(s)
 
 ## First-Time Server Setup
 
-Run these commands in the Discord server where you want to use the bot.
+Run `/setup` in the Discord server where you want to use the bot. It opens an interactive setup panel with buttons, role menus, channel menus, and text prompts.
+
+Open setup:
+
+```text
+/setup
+```
+
+From there you can configure:
+
+- Default timezone
+- Manager roles
+- Shared reminder channel for MRC and scrims
+- MRC event posting channel
+- MRC reminder ping roles
+- Scrim event posting channel
+- Scrim ping roles
+- Ignite result channel
+- Ignite source URL
+- Ignite tracked team
+- Ignite auto-posting
 
 ### 1. Set Manager Roles
 
 This lets staff manage the bot without needing full Discord admin permissions.
 
-```text
-/config manager_role role:@Tournament Staff
-/config manager_role role:@MRC Admin
-```
-
-Check shared config:
-
-```text
-/config status
-```
+Use `/setup`, choose **Roles**, then use the **Check manager roles** menu. Checked roles are managers; unchecked roles are removed from the manager list.
 
 ### 2. Set The Default Timezone
 
 Use your main tournament timezone.
 
-```text
-/mrc config_timezone timezone_name:"America/Denver"
-```
+Use `/setup`, choose **Timezone**, then enter a timezone.
 
 You can also use abbreviations like `EST`, `PST`, `UTC`, `MT`, or full IANA names like `Europe/London`.
 
-### 3. Set The MRC Reminder Channel
+### 3. Set The Shared Reminder Channel
 
-```text
-/mrc config_channel channel:#mrc-reminders
-```
+Use `/setup`, choose **Channels**, then choose the reminder channel. Both MRC and scrim 30-minute reminders use this channel.
 
-### 4. Add Reminder Ping Roles
+### 4. Set Event Posting Channels
 
-```text
-/mrc reminder_role_add role:@Players
-/mrc reminder_role_add role:@MRC
-```
+Use `/setup`, choose **Channels**, then choose the MRC event channel and scrim event channel. New events are posted in their respective channels when staff create them.
 
-List reminder roles:
+### 5. Add Reminder Ping Roles
 
-```text
-/mrc reminder_role_list
-```
+Use `/setup`, choose **Roles**, then use the **Check MRC reminder ping roles** menu. Checked roles receive reminders; unchecked roles are removed.
 
 Scrim pings are configured separately:
 
-```text
-/scrim ping_role_add role:@Players
-/scrim ping_role_add role:@Scrim Team
-/scrim ping_role_list
-```
+Use `/setup`, choose **Roles**, then use the **Check scrim ping roles** menu. Checked roles receive scrim pings/reminders; unchecked roles are removed.
 
-### 5. Set Up Ignite Results
+The scrim ping roles are also used for 30-minute scrim reminders.
 
-```text
-/ignite set_channel channel:#ignite-results
-/ignite set_source url:"https://liquipedia.net/marvelrivals/MR_Ignite/2026/Preseason/Americas"
-```
+### 6. Set Up Ignite Results
+
+Use `/setup`, choose **Channels** for the result channel, then choose **Ignite** for source/team/auto-posting.
 
 Optional: only post results for one team.
 
-```text
-/ignite set_tracked_team team_name:"Vengeful"
-```
+Use `/setup`, choose **Ignite**, then choose **Source / Team**.
 
 Enable auto-posting:
 
-```text
-/ignite enable_auto
-```
+Use `/setup`, choose **Ignite**, then choose **Toggle Auto**.
 
 Check Ignite setup:
 
-```text
-/ignite status
-```
+Use `/setup` again to review the current setup summary.
 
-### 6. Check Bot Health
+### 7. Check Bot Health
 
 ```text
 /health
@@ -183,22 +176,22 @@ This checks the database, background tasks, Ignite source reachability, and Disc
 The team name is plain text. The opponent does not need a Discord role.
 
 ```text
-/scrim create team_name:"Team1" event_datetime:"4/22/26 4pm EST" duration_hours:2
+/scrim create team:"Team1" date_time:"4/22/26 4pm EST" duration_hrs:2
 ```
 
 With a timezone override:
 
 ```text
-/scrim create team_name:"Team1" event_datetime:"April 22 4:00 PM" duration_hours:2 timezone_name:"America/Denver"
+/scrim create team:"Team1" date_time:"April 22 4:00 PM" duration_hrs:2 timezone:"America/Denver"
 ```
 
 The bot creates a Discord Scheduled Event with the required duration and stores the scrim for `/upcoming`.
-The Discord event description includes the bot's `Event ID`, which is the number used for edit commands.
+The Discord event description includes the bot's prefixed `Event ID`. Scrim IDs start with `S`, like `S1`.
 
 Edit a scrim later:
 
 ```text
-/scrim edit event_id:12
+/edit event_id:S1
 ```
 
 Manage scrims like MRC events:
@@ -206,28 +199,34 @@ Manage scrims like MRC events:
 ```text
 /scrim view
 /scrim upcoming days:14
-/scrim status event_id:12 status:"Completed"
-/scrim delete event_id:12
+/scrim status event_id:S1 status:"Completed"
+/scrim delete event_id:S1
 ```
 
-Set roles to ping when scrims are created:
+Set roles to ping for scrim reminders:
 
 ```text
-/scrim ping_role_add role:@Players
-/scrim ping_role_add role:@Scrim Team
-/scrim ping_role_list
+/setup
 ```
+
+Choose **Roles**, then check the scrim ping roles.
 
 ### Add One MRC Event
 
 ```text
-/mrc add datetime_str:"April 25 1:00 PM" rounds:"1-3" bracket:"Upper" duration_hours:2
+/mrc add season:7 duration_hrs:2 date_time:"April 25 1:00 PM" name:"Rounds 1-3"
 ```
 
-With a timezone:
+Put the timezone in the date/time when needed:
 
 ```text
-/mrc add datetime_str:"April 25 1:00 PM" rounds:"Rounds 1-3" bracket:"Upper" duration_hours:2 timezone_name:"America/Denver"
+/mrc add season:7 duration_hrs:2 date_time:"4/20/26 3PM EST" name:"Rounds 7-9"
+```
+
+The name can be any title:
+
+```text
+/mrc add season:7 duration_hrs:2 date_time:"April 25 7:00 PM America/Denver" name:"Grand Finals"
 ```
 
 ### Bulk Import MRC Events
@@ -235,18 +234,20 @@ With a timezone:
 Use `/mrc import` with a required duration, then paste lines in this format:
 
 ```text
-/mrc import schedule:"April 25 1:00 PM Rounds 1-3 Upper" duration_hours:2
+/mrc import schedule:"April 25 1:00 PM Rounds 1-3 Upper" duration_hrs:2
 ```
 
 ```text
 April 25 1:00 PM Rounds 1-3 Upper
 April 25 4:00 PM Rounds 1-3 Upper
 April 25 7:00 PM Rounds 1-3 Lower
+April 25 9:00 PM Rounds 7-9
 ```
 
-Lines can include a timezone:
+Lines can include a timezone before or after the title:
 
 ```text
+April 25 1:00 PM America/Denver Rounds 1-3 Upper
 April 25 1:00 PM Rounds 1-3 Upper America/Denver
 April 25 4:00 PM Rounds 1-3 Lower PST
 ```
@@ -254,18 +255,19 @@ April 25 4:00 PM Rounds 1-3 Lower PST
 ### Add MRC Events Interactively
 
 ```text
-/mrc session duration_hours:2
+/mrc session season:7 duration_hrs:2
 ```
 
 Then send one line at a time:
 
 ```text
-April 25 1:00 PM Rounds 1-3 Upper
-April 25 4:00 PM Rounds 1-3 Lower
+April 25 1:00 PM Rounds 1-3
+4/20/26 3PM EST Rounds 7-9
+April 25 4:00 PM Rounds 1-3 Upper
 done
 ```
 
-Use `cancel` to stop.
+The text after the date/time becomes the event title. A final `Upper` or `Lower` is optional. Use `cancel` to stop.
 
 ### View The Schedule
 
@@ -303,10 +305,10 @@ MRC events and scrims together:
 /upcoming days:14
 ```
 
-### Edit An MRC Event
+### Edit An Event
 
 ```text
-/mrc edit event_id:12
+/edit event_id:M1
 ```
 
 Discord opens a prefilled form with:
@@ -319,13 +321,13 @@ Discord opens a prefilled form with:
 
 Submit the form to update the database and the linked Discord Scheduled Event.
 Use `/mrc status` to change event status.
-The linked Discord Scheduled Event description includes the bot's `Event ID`.
+The linked Discord Scheduled Event description includes the bot's prefixed `Event ID`. MRC IDs start with `M`, like `M1`.
 
 ### Change Event Status
 
 ```text
-/mrc status event_id:12 status:"In Progress"
-/mrc status event_id:12 status:"Completed"
+/mrc status event_id:M1 status:"In Progress"
+/mrc status event_id:M1 status:"Completed"
 ```
 
 Supported statuses:
@@ -361,7 +363,7 @@ Include completed/cancelled events:
 ### Delete An MRC Event
 
 ```text
-/mrc delete event_id:12
+/mrc delete event_id:M1
 ```
 
 This deletes the database match and its linked Discord Scheduled Event.
@@ -395,71 +397,57 @@ In Discord, the `<t:...>` parts render as real local times.
 
 ## Command Reference
 
-### Shared Config
+### Setup
+
+Use `/setup` first. It opens an interactive setup panel for timezone, manager roles, the shared reminder channel, MRC event channel, scrim event channel, MRC reminder roles, scrim ping roles, and Ignite posting settings.
 
 | Command | What It Does |
 | --- | --- |
-| `/config manager_role role:@Role` | Adds a role allowed to manage bot commands. |
-| `/config remove_manager_role role:@Role` | Removes one configured manager role. |
-| `/config clear_manager_role` | Clears all configured manager roles. |
-| `/config manager_roles` | Lists configured manager roles. |
-| `/config status` | Shows shared config for the server. |
+| `/setup` | Opens the interactive setup panel. |
+
+### Bot Health
+
+| Command | What It Does |
+| --- | --- |
 | `/health` | Checks database, task, Ignite, and latency health. |
 
 ### Scrims
 
 | Command | What It Does |
 | --- | --- |
-| `/scrim create team_name event_datetime duration_hours` | Creates a scrim Scheduled Event against a plain-text opponent. |
+| `/scrim create team date_time duration_hrs` | Creates a scrim Scheduled Event against a plain-text opponent. |
 | `/scrim view` | Shows active scrim events with pagination. |
 | `/scrim upcoming` | Shows upcoming scrim events. |
-| `/scrim edit event_id` | Opens a prefilled edit form for a scrim event. |
 | `/scrim status event_id status` | Sets scrim event status. |
 | `/scrim archive_completed` | Archives completed/cancelled scrim events. |
 | `/scrim repair_events` | Recreates missing Discord Scheduled Events for scrims. |
 | `/scrim delete event_id` | Deletes a scrim and its linked event. |
-| `/scrim ping_role_add role:@Role` | Adds a role to ping when scrims are created. |
-| `/scrim ping_role_remove role:@Role` | Removes a scrim ping role. |
-| `/scrim ping_role_list` | Lists scrim ping roles. |
 | `/upcoming days:14` | Shows upcoming MRC events and scrims together. |
 
 ### MRC Scheduling
 
 | Command | What It Does |
 | --- | --- |
-| `/mrc add` | Adds one MRC event with a required event duration. |
+| `/mrc add season duration_hrs date_time name` | Adds one MRC event. The name becomes the Scheduled Event title after `MRC S# -`. |
 | `/mrc import` | Bulk imports many MRC events from pasted text with one required duration for all imported events. |
-| `/mrc session` | Adds events one by one in chat with one required duration for the session. |
+| `/mrc session season duration_hrs` | Adds events one by one in chat with one required season and duration for the session. |
 | `/mrc view` | Shows active MRC events with pagination. |
 | `/mrc upcoming` | Shows upcoming MRC events. |
-| `/mrc edit event_id` | Opens a prefilled edit form. |
 | `/mrc status` | Sets event status. |
 | `/mrc archive_completed` | Archives completed/cancelled events. |
 | `/mrc repair_events` | Recreates missing Discord Scheduled Events. |
-| `/mrc delete` | Deletes a match and its linked event. |
+| `/mrc delete` | Deletes an event and its linked Discord Scheduled Event. |
 
-### MRC Settings
+### Shared Event Actions
 
 | Command | What It Does |
 | --- | --- |
-| `/mrc config_view` | Shows MRC settings. |
-| `/mrc config_channel channel:#channel` | Sets the MRC reminder channel. |
-| `/mrc config_timezone timezone_name:"America/Denver"` | Sets default timezone. |
-| `/mrc reminder_role_add role:@Role` | Adds a role to ping in reminders. |
-| `/mrc reminder_role_remove role:@Role` | Removes a reminder ping role. |
-| `/mrc reminder_role_list` | Lists reminder ping roles. |
+| `/edit event_id` | Opens the correct edit form for `M#` MRC IDs or `S#` scrim IDs. |
 
 ### Ignite
 
 | Command | What It Does |
 | --- | --- |
-| `/ignite set_channel channel:#channel` | Sets where Ignite results are posted. |
-| `/ignite set_source url:"https://liquipedia.net/..."` | Sets the Liquipedia source page. |
-| `/ignite enable_auto` | Enables auto result posting. |
-| `/ignite disable_auto` | Disables auto result posting. |
-| `/ignite status` | Shows Ignite settings and failure state. |
-| `/ignite set_tracked_team team_name:"Vengeful"` | Only posts results involving that team. |
-| `/ignite clear_tracked_team` | Posts results for all teams. |
 | `/ignite check_now` | Checks Liquipedia immediately. |
 
 ## Permissions
@@ -469,7 +457,7 @@ Users can manage schedule/config commands if they have any of:
 - Administrator
 - Manage Server
 - Manage Events
-- any configured manager role from `/config manager_role`
+- any configured manager role from `/setup`
 
 The bot itself needs:
 
@@ -485,7 +473,9 @@ All main data is separated by Discord server:
 
 - MRC events
 - scrims
-- reminder channels
+- shared reminder channel
+- MRC event posting channel
+- scrim event posting channel
 - reminder roles
 - manager roles
 - default timezone
@@ -515,31 +505,38 @@ Changes in one server do not affect another server.
 Use this format:
 
 ```text
-April 25 1:00 PM Rounds 1-3 Upper
+April 25 1:00 PM Rounds 1-3
+4/20/26 3PM EST Rounds 7-9
 ```
 
 Required:
 
-- month name
+- month name or numeric date
 - day
 - 12-hour time with AM/PM
-- `Rounds X-X`
-- `Upper` or `Lower`
+- event title text after the date/time
+
+Optional:
+
+- timezone abbreviation or IANA timezone, such as `EST` or `America/Denver`
+- a final `Upper` or `Lower` bracket label
 
 ### Scrim Pings Do Not Happen
 
 Add at least one scrim ping role:
 
 ```text
-/scrim ping_role_add role:@Players
+/setup
 ```
+
+Choose **Roles**, then check at least one scrim ping role.
 
 ### Ignite Does Not Post
 
 Check:
 
 ```text
-/ignite status
+/setup
 /health
 ```
 

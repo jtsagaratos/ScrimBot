@@ -7,6 +7,7 @@ from tempfile import mkstemp
 from types import SimpleNamespace
 
 from cogs.ignite import DEFAULT_IGNITE_URL, parse_ignite_results_html
+from cogs.mrc import MRCCog
 from models.database import DatabaseManager
 from models.permissions import is_manager
 from models.time_utils import discord_timestamp, to_utc_iso
@@ -91,6 +92,20 @@ class DatabaseTests(TempDatabaseTestCase):
         self.assertEqual(scrim["id"], scrim_id)
         self.assertEqual(scrim["duration_hours"], 3)
 
+    def test_mrc_match_stores_season(self):
+        dt = to_utc_iso(datetime.now(timezone.utc) + timedelta(days=1))
+        match_id = self.db.add_mrc_match(
+            206,
+            dt,
+            "Rounds 7-9",
+            "",
+            season=8,
+        )
+
+        match = self.db.get_mrc_match(206, match_id)
+        self.assertEqual(match["season"], 8)
+        self.assertEqual(match["bracket"], "")
+
     def test_scrim_can_be_updated_by_event_id(self):
         dt = to_utc_iso(datetime.now(timezone.utc) + timedelta(days=1))
         scrim_id = self.db.add_scrim(203, "Old Team", None, dt, "UTC", "999", duration_hours=2)
@@ -139,6 +154,44 @@ class DatabaseTests(TempDatabaseTestCase):
         with_archived = self.db.get_all_scrims(204, include_completed=True, include_archived=True)
         self.assertEqual({scrim["id"] for scrim in with_archived}, {scheduled_id, completed_id})
 
+    def test_scrim_reminder_settings_and_due_queries(self):
+        now = datetime.now(timezone.utc)
+        self.db.update_guild_settings(
+            205,
+            reminder_channel_id=123456,
+            mrc_event_channel_id=234567,
+            scrim_event_channel_id=345678,
+        )
+        settings = self.db.get_guild_settings(205)
+        self.assertEqual(settings["reminder_channel_id"], 123456)
+        self.assertEqual(settings["mrc_event_channel_id"], 234567)
+        self.assertEqual(settings["scrim_event_channel_id"], 345678)
+
+        due_id = self.db.add_scrim(
+            205,
+            "Due Team",
+            None,
+            to_utc_iso(now + timedelta(minutes=20)),
+            "UTC",
+            "333",
+        )
+        later_id = self.db.add_scrim(
+            205,
+            "Later Team",
+            None,
+            to_utc_iso(now + timedelta(hours=2)),
+            "UTC",
+            "444",
+        )
+
+        due_scrims = self.db.get_scrims_needing_30_minute_reminder()
+        self.assertIn(due_id, {scrim["id"] for scrim in due_scrims})
+        self.assertNotIn(later_id, {scrim["id"] for scrim in due_scrims})
+
+        self.db.mark_scrim_30_minute_reminder_sent(205, due_id)
+        due_scrims = self.db.get_scrims_needing_30_minute_reminder()
+        self.assertNotIn(due_id, {scrim["id"] for scrim in due_scrims})
+
 
 class IgniteParserTests(unittest.TestCase):
     def test_parse_ignite_results_html(self):
@@ -166,6 +219,56 @@ class TimeTests(unittest.TestCase):
     def test_discord_timestamp(self):
         value = to_utc_iso(datetime(2026, 4, 25, 19, 0, tzinfo=timezone.utc))
         self.assertEqual(discord_timestamp(value, "F"), "<t:1777143600:F>")
+
+
+class MRCParserTests(unittest.TestCase):
+    def test_mrc_session_accepts_numeric_date_and_compact_time(self):
+        cog = MRCCog.__new__(MRCCog)
+        parsed = cog.parse_mrc_line("4/20/26 3PM EST Rounds 1-3 Upper", "US/Eastern")
+
+        self.assertIsNotNone(parsed)
+        dt, round_group, bracket, timezone_name = parsed
+        self.assertEqual(dt.year, 2026)
+        self.assertEqual(dt.month, 4)
+        self.assertEqual(dt.day, 20)
+        self.assertEqual(dt.hour, 15)
+        self.assertEqual(round_group, "Rounds 1-3")
+        self.assertEqual(bracket, "Upper")
+        self.assertEqual(timezone_name, "US/Eastern")
+
+    def test_mrc_session_accepts_title_without_bracket(self):
+        cog = MRCCog.__new__(MRCCog)
+        parsed = cog.parse_mrc_line("4/20/26 3PM EST Rounds 7-9", "US/Eastern")
+
+        self.assertIsNotNone(parsed)
+        dt, round_group, bracket, timezone_name = parsed
+        self.assertEqual(dt.year, 2026)
+        self.assertEqual(dt.month, 4)
+        self.assertEqual(dt.day, 20)
+        self.assertEqual(dt.hour, 15)
+        self.assertEqual(round_group, "Rounds 7-9")
+        self.assertEqual(bracket, "")
+        self.assertEqual(timezone_name, "US/Eastern")
+
+    def test_mrc_session_accepts_arbitrary_title(self):
+        cog = MRCCog.__new__(MRCCog)
+        parsed = cog.parse_mrc_line("4/20/26 3PM EST Grand Finals", "US/Eastern")
+
+        self.assertIsNotNone(parsed)
+        _, round_group, bracket, _ = parsed
+        self.assertEqual(round_group, "Grand Finals")
+        self.assertEqual(bracket, "")
+
+    def test_mrc_line_accepts_timezone_after_title(self):
+        cog = MRCCog.__new__(MRCCog)
+        parsed = cog.parse_mrc_line("April 25 1:00 PM Rounds 1-3 Upper America/Denver", "US/Eastern")
+
+        self.assertIsNotNone(parsed)
+        dt, round_group, bracket, timezone_name = parsed
+        self.assertEqual(dt.hour, 13)
+        self.assertEqual(round_group, "Rounds 1-3")
+        self.assertEqual(bracket, "Upper")
+        self.assertEqual(timezone_name, "America/Denver")
 
 
 class PermissionTests(TempDatabaseTestCase):

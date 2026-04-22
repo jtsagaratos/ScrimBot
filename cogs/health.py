@@ -31,6 +31,9 @@ class HealthCog(commands.Cog):
         mrc = self.bot.get_cog("MRCCog")
         if mrc and getattr(mrc, "reminder_task", None):
             checks.append(f"MRC reminder task: {'running' if mrc.reminder_task.is_running() else 'stopped'}")
+        scrim = self.bot.get_cog("ScrimCog")
+        if scrim and getattr(scrim, "scrim_reminder_task", None):
+            checks.append(f"Scrim reminder task: {'running' if scrim.scrim_reminder_task.is_running() else 'stopped'}")
         else:
             checks.append("MRC reminder task: not loaded")
 

@@ -26,6 +26,7 @@ class DatabaseManager:
                 datetime TEXT NOT NULL,
                 round_group TEXT NOT NULL,
                 bracket TEXT NOT NULL,
+                season INTEGER NOT NULL DEFAULT 7,
                 opponent TEXT,
                 discord_event_id TEXT,
                 reminder_sent_30 INTEGER NOT NULL DEFAULT 0,
@@ -47,6 +48,7 @@ class DatabaseManager:
                 datetime TEXT NOT NULL,
                 timezone TEXT NOT NULL,
                 discord_event_id TEXT,
+                reminder_sent_30 INTEGER NOT NULL DEFAULT 0,
                 duration_hours REAL NOT NULL DEFAULT 2.0,
                 status TEXT NOT NULL DEFAULT 'Scheduled',
                 archived INTEGER NOT NULL DEFAULT 0,
@@ -59,6 +61,9 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id INTEGER PRIMARY KEY,
                 reminder_channel_id INTEGER,
+                scrim_reminder_channel_id INTEGER,
+                mrc_event_channel_id INTEGER,
+                scrim_event_channel_id INTEGER,
                 manager_role_id INTEGER,
                 timezone TEXT NOT NULL DEFAULT 'US/Eastern',
                 created_at TEXT NOT NULL,
@@ -99,9 +104,14 @@ class DatabaseManager:
         self._ensure_column(cursor, "mrc_matches", "status", "TEXT NOT NULL DEFAULT 'Scheduled'")
         self._ensure_column(cursor, "mrc_matches", "archived", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(cursor, "mrc_matches", "duration_hours", "REAL NOT NULL DEFAULT 2.0")
+        self._ensure_column(cursor, "mrc_matches", "season", "INTEGER NOT NULL DEFAULT 7")
+        self._ensure_column(cursor, "scrim_events", "reminder_sent_30", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(cursor, "scrim_events", "duration_hours", "REAL NOT NULL DEFAULT 2.0")
         self._ensure_column(cursor, "scrim_events", "status", "TEXT NOT NULL DEFAULT 'Scheduled'")
         self._ensure_column(cursor, "scrim_events", "archived", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column(cursor, "guild_settings", "scrim_reminder_channel_id", "INTEGER")
+        self._ensure_column(cursor, "guild_settings", "mrc_event_channel_id", "INTEGER")
+        self._ensure_column(cursor, "guild_settings", "scrim_event_channel_id", "INTEGER")
         self._ensure_column(cursor, "guild_settings", "manager_role_id", "INTEGER")
 
         conn.commit()
@@ -131,15 +141,16 @@ class DatabaseManager:
             'datetime': row[2],
             'round_group': row[3],
             'bracket': row[4],
-            'opponent': row[5],
-            'discord_event_id': row[6],
-            'reminder_sent_30': row[7],
-            'timezone': row[8],
-            'status': row[9],
-            'archived': row[10],
-            'duration_hours': row[11],
-            'created_at': row[12],
-            'updated_at': row[13]
+            'season': row[5],
+            'opponent': row[6],
+            'discord_event_id': row[7],
+            'reminder_sent_30': row[8],
+            'timezone': row[9],
+            'status': row[10],
+            'archived': row[11],
+            'duration_hours': row[12],
+            'created_at': row[13],
+            'updated_at': row[14]
         }
 
     def _row_to_scrim(self, row) -> Dict:
@@ -151,11 +162,12 @@ class DatabaseManager:
             'datetime': row[4],
             'timezone': row[5],
             'discord_event_id': row[6],
-            'duration_hours': row[7],
-            'status': row[8],
-            'archived': row[9],
-            'created_at': row[10],
-            'updated_at': row[11],
+            'reminder_sent_30': row[7],
+            'duration_hours': row[8],
+            'status': row[9],
+            'archived': row[10],
+            'created_at': row[11],
+            'updated_at': row[12],
         }
 
     # ==================== SETTINGS ====================
@@ -166,7 +178,9 @@ class DatabaseManager:
 
         try:
             cursor.execute('''
-                SELECT guild_id, reminder_channel_id, manager_role_id, timezone, created_at, updated_at
+                SELECT guild_id, reminder_channel_id, scrim_reminder_channel_id,
+                       mrc_event_channel_id, scrim_event_channel_id, manager_role_id,
+                       timezone, created_at, updated_at
                 FROM guild_settings
                 WHERE guild_id = ?
             ''', (guild_id,))
@@ -175,10 +189,13 @@ class DatabaseManager:
                 return {
                     'guild_id': row[0],
                     'reminder_channel_id': row[1],
-                    'manager_role_id': row[2],
-                    'timezone': row[3],
-                    'created_at': row[4],
-                    'updated_at': row[5],
+                    'scrim_reminder_channel_id': row[2],
+                    'mrc_event_channel_id': row[3],
+                    'scrim_event_channel_id': row[4],
+                    'manager_role_id': row[5],
+                    'timezone': row[6],
+                    'created_at': row[7],
+                    'updated_at': row[8],
                 }
 
             now = self._utc_now_iso()
@@ -190,6 +207,9 @@ class DatabaseManager:
             return {
                 'guild_id': guild_id,
                 'reminder_channel_id': None,
+                'scrim_reminder_channel_id': None,
+                'mrc_event_channel_id': None,
+                'scrim_event_channel_id': None,
                 'manager_role_id': None,
                 'timezone': "US/Eastern",
                 'created_at': now,
@@ -199,7 +219,14 @@ class DatabaseManager:
             conn.close()
 
     def update_guild_settings(self, guild_id: int, **kwargs) -> bool:
-        allowed_fields = {'reminder_channel_id', 'manager_role_id', 'timezone'}
+        allowed_fields = {
+            'reminder_channel_id',
+            'scrim_reminder_channel_id',
+            'mrc_event_channel_id',
+            'scrim_event_channel_id',
+            'manager_role_id',
+            'timezone',
+        }
         update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
         if not update_fields:
             return False
@@ -381,7 +408,8 @@ class DatabaseManager:
                       discord_event_id: Optional[str] = None,
                       timezone_name: str = "US/Eastern",
                       status: str = "Scheduled",
-                      duration_hours: float = 2.0) -> int:
+                      duration_hours: float = 2.0,
+                      season: int = 7) -> int:
         """Add a new MRC match to database. Returns the match ID."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -390,10 +418,10 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 INSERT INTO mrc_matches
-                (guild_id, datetime, round_group, bracket, opponent, discord_event_id,
+                (guild_id, datetime, round_group, bracket, season, opponent, discord_event_id,
                  timezone, status, duration_hours, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (guild_id, datetime_str, round_group, bracket, opponent, discord_event_id,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (guild_id, datetime_str, round_group, bracket, season, opponent, discord_event_id,
                   timezone_name, status, duration_hours, now, now))
 
             conn.commit()
@@ -408,7 +436,7 @@ class DatabaseManager:
 
         try:
             cursor.execute('''
-                SELECT id, guild_id, datetime, round_group, bracket, opponent, discord_event_id,
+                SELECT id, guild_id, datetime, round_group, bracket, season, opponent, discord_event_id,
                        reminder_sent_30, timezone, status, archived, duration_hours, created_at, updated_at
                 FROM mrc_matches
                 WHERE id = ? AND guild_id = ?
@@ -440,7 +468,7 @@ class DatabaseManager:
                 where_clauses.append("status NOT IN ('Completed', 'Cancelled')")
 
             cursor.execute('''
-                SELECT id, guild_id, datetime, round_group, bracket, opponent, discord_event_id,
+                SELECT id, guild_id, datetime, round_group, bracket, season, opponent, discord_event_id,
                        reminder_sent_30, timezone, status, archived, duration_hours, created_at, updated_at
                 FROM mrc_matches
                 WHERE ''' + " AND ".join(where_clauses) + '''
@@ -473,13 +501,14 @@ class DatabaseManager:
     def update_mrc_match(self, guild_id: int, match_id: int, **kwargs) -> bool:
         """
         Update an MRC match with provided fields.
-        Allowed fields: datetime, round_group, bracket, opponent, discord_event_id,
+        Allowed fields: datetime, round_group, bracket, season, opponent, discord_event_id,
         reminder_sent_30, timezone, status, archived, duration_hours
         """
         allowed_fields = {
             'datetime',
             'round_group',
             'bracket',
+            'season',
             'opponent',
             'discord_event_id',
             'reminder_sent_30',
@@ -546,7 +575,7 @@ class DatabaseManager:
 
         try:
             cursor.execute('''
-                SELECT id, guild_id, datetime, round_group, bracket, opponent, discord_event_id,
+                SELECT id, guild_id, datetime, round_group, bracket, season, opponent, discord_event_id,
                        reminder_sent_30, timezone, status, archived, duration_hours, created_at, updated_at
                 FROM mrc_matches
                 WHERE reminder_sent_30 = 0
@@ -604,8 +633,8 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT INTO scrim_events
                 (guild_id, team_name, role_id, datetime, timezone, discord_event_id,
-                 duration_hours, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 reminder_sent_30, duration_hours, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
             ''', (guild_id, team_name, role_id, datetime_str, timezone_name, discord_event_id,
                   duration_hours, status, now, now))
             conn.commit()
@@ -652,7 +681,7 @@ class DatabaseManager:
 
             cursor.execute('''
                 SELECT id, guild_id, team_name, role_id, datetime, timezone, discord_event_id,
-                       duration_hours, status, archived, created_at, updated_at
+                       reminder_sent_30, duration_hours, status, archived, created_at, updated_at
                 FROM scrim_events
                 WHERE ''' + " AND ".join(where_clauses) + '''
                 ORDER BY datetime ASC
@@ -668,7 +697,7 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 SELECT id, guild_id, team_name, role_id, datetime, timezone, discord_event_id,
-                       duration_hours, status, archived, created_at, updated_at
+                       reminder_sent_30, duration_hours, status, archived, created_at, updated_at
                 FROM scrim_events
                 WHERE id = ? AND guild_id = ?
             ''', (scrim_id, guild_id))
@@ -686,6 +715,7 @@ class DatabaseManager:
             'datetime',
             'timezone',
             'discord_event_id',
+            'reminder_sent_30',
             'duration_hours',
             'status',
             'archived',
@@ -743,3 +773,33 @@ class DatabaseManager:
             return cursor.rowcount
         finally:
             conn.close()
+
+    def get_scrims_needing_30_minute_reminder(self) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, team_name, role_id, datetime, timezone, discord_event_id,
+                       reminder_sent_30, duration_hours, status, archived, created_at, updated_at
+                FROM scrim_events
+                WHERE reminder_sent_30 = 0
+                  AND archived = 0
+                ORDER BY datetime ASC
+            ''')
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        now = datetime.now(timezone.utc)
+        cutoff = now + timedelta(minutes=30)
+        scrims = []
+        for row in rows:
+            scrim = self._row_to_scrim(row)
+            dt = self._parse_stored_datetime(scrim['datetime'])
+            if now < dt <= cutoff:
+                scrims.append(scrim)
+        return scrims
+
+    def mark_scrim_30_minute_reminder_sent(self, guild_id: int, scrim_id: int) -> bool:
+        return self.update_scrim(guild_id, scrim_id, reminder_sent_30=1)

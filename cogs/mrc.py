@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 import discord
 import pytz
+from dateutil import parser as date_parser
 from discord import app_commands
 from discord.ext import commands, tasks
 
@@ -32,7 +33,7 @@ STATUS_CHOICES = [app_commands.Choice(name=status, value=status) for status in M
 
 class MRCEditModal(discord.ui.Modal):
     def __init__(self, cog, guild_id: int, match: dict):
-        super().__init__(title=f"Edit MRC Event #{match['id']}")
+        super().__init__(title=f"Edit MRC Event M{match['id']}")
         self.cog = cog
         self.guild_id = guild_id
         self.match = match
@@ -59,15 +60,15 @@ class MRCEditModal(discord.ui.Modal):
             max_length=10,
         )
         self.rounds_input = discord.ui.TextInput(
-            label="Rounds",
+            label="Title",
             default=match["round_group"],
-            placeholder="Rounds 1-3",
+            placeholder="Rounds 1-3 or Grand Finals",
             max_length=80,
         )
         self.bracket_input = discord.ui.TextInput(
-            label="Bracket",
+            label="Bracket (optional)",
             default=match["bracket"],
-            placeholder="Upper or Lower",
+            placeholder="Upper, Lower, or blank",
             max_length=20,
         )
         self.add_item(self.datetime_input)
@@ -85,15 +86,15 @@ class MRCEditModal(discord.ui.Modal):
 
             match = self.cog.db.get_mrc_match(self.guild_id, self.match["id"])
             if not match:
-                await interaction.response.send_message(f"Event ID {self.match['id']} not found.", ephemeral=True)
+                await interaction.response.send_message(f"Event ID M{self.match['id']} not found.", ephemeral=True)
                 return
 
             timezone_name = normalize_timezone(str(self.timezone_input.value).strip(), match["timezone"])
             new_datetime = self.cog.parse_mrc_datetime(str(self.datetime_input.value).strip(), timezone_name)
-            round_group = self.cog.normalize_round_group(str(self.rounds_input.value).strip())
+            round_group = self.cog.normalize_mrc_title(str(self.rounds_input.value).strip())
             bracket = str(self.bracket_input.value).strip().capitalize()
-            if bracket not in {"Upper", "Lower"}:
-                raise ValueError("Bracket must be 'Upper' or 'Lower'")
+            if bracket and bracket not in {"Upper", "Lower"}:
+                raise ValueError("Bracket must be 'Upper', 'Lower', or blank")
             duration_hours = validate_duration_hours(str(self.duration_input.value).strip())
 
             self.cog.db.update_mrc_match(
@@ -116,6 +117,7 @@ class MRCEditModal(discord.ui.Modal):
                     bracket,
                     duration_hours,
                     match["id"],
+                    match.get("season", 7),
                 )
 
             updated = self.cog.db.get_mrc_match(self.guild_id, match["id"])
@@ -149,7 +151,7 @@ class MRCMatchPageView(discord.ui.View):
         start = self.page * self.page_size
         end = start + self.page_size
         for match in self.matches[start:end]:
-            embed.add_field(name=f"Event ID {match['id']}", value=self.cog.build_match_line(match), inline=False)
+            embed.add_field(name=f"Event ID {self.cog.format_public_id(match)}", value=self.cog.build_match_line(match), inline=False)
         return embed
 
     def update_buttons(self):
@@ -201,43 +203,36 @@ class MRCCog(commands.Cog):
         default_timezone: str,
         year: int = 2026,
     ) -> Optional[Tuple[datetime, str, str, str]]:
-        """
-        Parse a single MRC schedule line.
-        Format: "April 25 1:00 PM Rounds 1-3 Upper [timezone]"
-        Returns: (aware_datetime, round_group, bracket, timezone_name) or None.
-        """
+        """Parse a single MRC schedule line into datetime, title, optional bracket, and timezone."""
         line = line.strip()
         if not line:
             return None
 
         try:
-            pattern = (
-                r"(\w+)\s+(\d{1,2})\s+(\d{1,2}):(\d{2})\s+"
-                r"(AM|PM)\s+Rounds?\s+([\d\s\-]+)\s+(Upper|Lower)(?:\s+(.+))?$"
-            )
-            match = re.search(pattern, line, re.IGNORECASE)
-            if not match:
-                return None
+            tokens = line.split()
+            for split_index in range(len(tokens) - 1, 0, -1):
+                datetime_part = " ".join(tokens[:split_index])
+                title_part = " ".join(tokens[split_index:]).strip()
+                if not title_part:
+                    continue
 
-            month_str, day_str, hour_str, minute_str, am_pm, rounds_str, bracket, line_timezone = match.groups()
-            timezone_name = normalize_timezone(line_timezone, default_timezone)
-            day = int(day_str)
-            hour = int(hour_str)
-            minute = int(minute_str)
+                datetime_without_timezone, trailing_timezone = split_trailing_timezone(datetime_part)
+                timezone_name = normalize_timezone(trailing_timezone, default_timezone)
+                try:
+                    aware_dt = self.parse_mrc_datetime(datetime_without_timezone, timezone_name, year=year)
+                except ValueError:
+                    continue
 
-            if am_pm.upper() == "PM" and hour != 12:
-                hour += 12
-            elif am_pm.upper() == "AM" and hour == 12:
-                hour = 0
+                title_without_timezone, title_trailing_timezone = split_trailing_timezone(title_part)
+                if title_trailing_timezone:
+                    timezone_name = normalize_timezone(title_trailing_timezone, timezone_name)
+                    aware_dt = self.parse_mrc_datetime(datetime_without_timezone, timezone_name, year=year)
+                    title_part = title_without_timezone
 
-            date_str = f"{month_str} {day} {year}"
-            dt = datetime.strptime(date_str, "%B %d %Y").replace(hour=hour, minute=minute)
-            aware_dt = localize_datetime(dt, timezone_name)
+                title, bracket = self.extract_optional_bracket(title_part)
+                return (aware_dt, title, bracket, timezone_name)
 
-            round_group = f"Rounds {rounds_str.strip()}"
-            bracket = bracket.strip().capitalize()
-
-            return (aware_dt, round_group, bracket, timezone_name)
+            return None
         except Exception as e:
             print(f"Error parsing line '{line}': {e}")
             return None
@@ -267,7 +262,13 @@ class MRCCog(commands.Cog):
             except ValueError:
                 continue
 
-        raise ValueError("Date must look like 'April 25 1:00 PM', optionally with a timezone.")
+        try:
+            default_dt = datetime(year, 1, 1)
+            return localize_datetime(date_parser.parse(datetime_part, default=default_dt), timezone_name)
+        except (ValueError, OverflowError) as exc:
+            raise ValueError(
+                "Date must look like 'April 25 1:00 PM' or '4/20/26 3PM', optionally with a timezone."
+            ) from exc
 
     def normalize_round_group(self, rounds: str) -> str:
         """Return a consistent 'Rounds X-Y' label from user input."""
@@ -275,6 +276,28 @@ class MRCCog(commands.Cog):
         if re.match(r"^rounds?\b", rounds, re.IGNORECASE):
             return rounds[0].upper() + rounds[1:]
         return f"Rounds {rounds}"
+
+    def normalize_mrc_title(self, title: str) -> str:
+        """Normalize a user-supplied MRC event title without forcing a bracket."""
+        title = re.sub(r"\s+", " ", title.strip())
+        if not title:
+            raise ValueError("MRC title cannot be blank")
+        if re.match(r"^rounds?\b", title, re.IGNORECASE):
+            return title[0].upper() + title[1:]
+        return title
+
+    def extract_optional_bracket(self, title: str) -> Tuple[str, str]:
+        title = self.normalize_mrc_title(title)
+        match = re.search(r"\s+(Upper|Lower)$", title, re.IGNORECASE)
+        if not match:
+            return title, ""
+        bracket = match.group(1).capitalize()
+        title_without_bracket = self.normalize_mrc_title(title[:match.start()].strip())
+        return title_without_bracket, bracket
+
+    def build_event_name(self, season: int, round_group: str, bracket: Optional[str] = None) -> str:
+        bracket_text = f" ({bracket})" if bracket else ""
+        return f"MRC S{season} - {round_group}{bracket_text}"
 
     def normalize_status(self, status: str) -> str:
         for allowed in MATCH_STATUSES:
@@ -285,12 +308,19 @@ class MRCCog(commands.Cog):
     def get_default_timezone(self, guild_id: int) -> str:
         return self.db.get_guild_settings(guild_id)["timezone"]
 
+    async def cleanup_session_messages(self, messages: list):
+        for message in messages:
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                continue
+
     # ==================== DISCORD HELPERS ====================
 
     def get_reminder_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
         """Pick the configured reminder channel, or a writable fallback."""
         settings = self.db.get_guild_settings(guild.id)
-        configured_channel_id = settings.get("reminder_channel_id")
+        configured_channel_id = settings.get("reminder_channel_id") or settings.get("scrim_reminder_channel_id")
         if configured_channel_id:
             channel = guild.get_channel(configured_channel_id)
             if isinstance(channel, discord.TextChannel):
@@ -309,6 +339,17 @@ class MRCCog(commands.Cog):
                 return channel
         return None
 
+    def get_mrc_event_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        settings = self.db.get_guild_settings(guild.id)
+        configured_channel_id = settings.get("mrc_event_channel_id")
+        if configured_channel_id:
+            channel = guild.get_channel(configured_channel_id)
+            if isinstance(channel, discord.TextChannel):
+                permissions = channel.permissions_for(guild.me)
+                if permissions.view_channel and permissions.send_messages:
+                    return channel
+        return None
+
     def get_reminder_role_mentions(self, guild: discord.Guild) -> str:
         mentions = []
         for role_id in self.db.get_reminder_roles(guild.id):
@@ -325,13 +366,14 @@ class MRCCog(commands.Cog):
         bracket: str,
         duration_hours: float,
         event_id: int,
+        season: int = 7,
     ) -> Optional[str]:
         """Create a Discord Scheduled Event and return its ID."""
         try:
-            event_name = f"MRC S7 - {round_group} ({bracket})"
+            event_name = self.build_event_name(season, round_group, bracket)
             event = await guild.create_scheduled_event(
                 name=event_name,
-                description=f"Vengeful MRC Match\nEvent ID: {event_id}",
+                description=f"Vengeful MRC Match\nEvent ID: {self.format_public_id(event_id)}",
                 start_time=match_datetime,
                 end_time=event_end_time(match_datetime, duration_hours),
                 privacy_level=discord.PrivacyLevel.guild_only,
@@ -353,6 +395,7 @@ class MRCCog(commands.Cog):
         bracket: Optional[str] = None,
         duration_hours: Optional[float] = None,
         event_database_id: Optional[int] = None,
+        season: Optional[int] = None,
     ) -> bool:
         """Update an existing Discord Scheduled Event."""
         try:
@@ -365,10 +408,10 @@ class MRCCog(commands.Cog):
                 update_kwargs["start_time"] = match_datetime
             if match_datetime and duration_hours is not None:
                 update_kwargs["end_time"] = event_end_time(match_datetime, duration_hours)
-            if round_group and bracket:
-                update_kwargs["name"] = f"MRC S7 - {round_group} ({bracket})"
+            if round_group is not None:
+                update_kwargs["name"] = self.build_event_name(season or 7, round_group, bracket)
             if event_database_id is not None:
-                update_kwargs["description"] = f"Vengeful MRC Match\nEvent ID: {event_database_id}"
+                update_kwargs["description"] = f"Vengeful MRC Match\nEvent ID: {self.format_public_id(event_database_id)}"
 
             if update_kwargs:
                 await event.edit(**update_kwargs)
@@ -388,12 +431,57 @@ class MRCCog(commands.Cog):
             print(f"Error deleting Discord event {event_id}: {e}")
             return False
 
+    def build_mrc_display_title(self, match: dict) -> str:
+        return self.build_event_name(match.get("season", 7), match["round_group"], match.get("bracket"))
+
+    def format_public_id(self, match_or_id) -> str:
+        if isinstance(match_or_id, dict):
+            match_id = match_or_id["id"]
+        else:
+            match_id = match_or_id
+        return f"M{match_id}"
+
+    def parse_public_id(self, event_id) -> int:
+        value = str(event_id).strip().upper()
+        if value.startswith("M"):
+            value = value[1:]
+        if not value.isdigit():
+            raise ValueError("MRC Event ID must look like M1")
+        return int(value)
+
+    def build_discord_event_url(self, guild: discord.Guild, event_id: Optional[str]) -> Optional[str]:
+        if not event_id:
+            return None
+        return f"https://discord.com/events/{guild.id}/{event_id}"
+
     def build_match_line(self, match: dict) -> str:
         archived = " | Archived" if match.get("archived") else ""
         return (
-            f"`Event ID {match['id']}` {discord_time_display(match['datetime'], match['timezone'])}\n"
-            f"{match['round_group']} | {match['bracket']} | {match['duration_hours']:g}h | {match['status']}{archived}"
+            f"`Event ID {self.format_public_id(match)}` {discord_time_display(match['datetime'], match['timezone'])}\n"
+            f"{self.build_mrc_display_title(match)} | {match['duration_hours']:g}h | {match['status']}{archived}"
         )
+
+    def build_mrc_created_message(self, match: dict, event_url: Optional[str] = None) -> str:
+        message = f"**{self.build_mrc_display_title(match)}**\n"
+        message += f"**Event ID:** {self.format_public_id(match)}\n"
+        message += f"**Time:** {discord_time_display(match['datetime'], match['timezone'])}\n"
+        message += f"**Duration:** {match['duration_hours']:g} hour(s)"
+        if event_url:
+            message += f"\n**Event Link:** {event_url}"
+        return message
+
+    async def post_mrc_created_message(
+        self,
+        guild: discord.Guild,
+        fallback_channel,
+        match: dict,
+        event_url: Optional[str] = None,
+    ):
+        channel = self.get_mrc_event_channel(guild) or fallback_channel
+        message = self.build_mrc_created_message(match, event_url)
+        if channel:
+            await channel.send(message)
+        return channel
 
     # ==================== AUTOCOMPLETE ====================
 
@@ -415,10 +503,12 @@ class MRCCog(commands.Cog):
         matches = self.db.get_all_mrc_matches(interaction.guild.id)
         choices = []
         for match in matches:
-            label = f"Event ID {match['id']} {match['round_group']} {match['bracket']} {match['status']}"
-            if current and current not in str(match["id"]) and current.lower() not in label.lower():
+            bracket = f" {match['bracket']}" if match.get("bracket") else ""
+            public_id = self.format_public_id(match)
+            label = f"Event ID {public_id} S{match.get('season', 7)} {match['round_group']}{bracket} {match['status']}"
+            if current and current.lower() not in public_id.lower() and current.lower() not in label.lower():
                 continue
-            choices.append(app_commands.Choice(name=label[:100], value=match["id"]))
+            choices.append(app_commands.Choice(name=label[:100], value=public_id))
             if len(choices) == 25:
                 break
         return choices
@@ -427,103 +517,14 @@ class MRCCog(commands.Cog):
 
     mrc_group = app_commands.Group(name="mrc", description="MRC schedule management commands")
 
-    @mrc_group.command(name="config_view", description="View MRC bot settings for this server")
-    async def mrc_config_view(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        if not interaction.guild:
-            await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
-            return
-
-        settings = self.db.get_guild_settings(interaction.guild.id)
-        channel = interaction.guild.get_channel(settings["reminder_channel_id"]) if settings["reminder_channel_id"] else None
-        roles = [interaction.guild.get_role(role_id) for role_id in self.db.get_reminder_roles(interaction.guild.id)]
-        role_mentions = [role.mention for role in roles if role]
-
-        response = "**MRC Settings**\n"
-        response += f"**Timezone:** {settings['timezone']}\n"
-        response += f"**Reminder Channel:** {channel.mention if channel else 'Auto'}\n"
-        response += f"**Reminder Roles:** {', '.join(role_mentions) if role_mentions else 'None'}"
-        await interaction.followup.send(response, ephemeral=True)
-
-    @mrc_group.command(name="config_channel", description="Set the channel where MRC reminders are sent")
-    @app_commands.describe(channel="Reminder channel")
-    async def mrc_config_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        try:
-            self.ensure_manager(interaction)
-            await interaction.response.defer(ephemeral=True)
-            if not interaction.guild:
-                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
-                return
-            self.db.update_guild_settings(interaction.guild.id, reminder_channel_id=channel.id)
-            await interaction.followup.send(f"Reminder channel set to {channel.mention}.", ephemeral=True)
-        except Exception as e:
-            await self.send_error(interaction, e)
-
-    @mrc_group.command(name="config_timezone", description="Set the default timezone for MRC and scrim commands")
-    @app_commands.describe(timezone_name="Timezone abbreviation or IANA name")
-    async def mrc_config_timezone(self, interaction: discord.Interaction, timezone_name: str):
-        try:
-            self.ensure_manager(interaction)
-            await interaction.response.defer(ephemeral=True)
-            if not interaction.guild:
-                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
-                return
-            normalized = normalize_timezone(timezone_name)
-            self.db.update_guild_settings(interaction.guild.id, timezone=normalized)
-            await interaction.followup.send(f"Default timezone set to `{normalized}`.", ephemeral=True)
-        except Exception as e:
-            await self.send_error(interaction, e)
-
-    @mrc_config_timezone.autocomplete("timezone_name")
-    async def mrc_config_timezone_autocomplete(self, interaction: discord.Interaction, current: str):
-        return await self.timezone_autocomplete(interaction, current)
-
-    @mrc_group.command(name="reminder_role_add", description="Add a role to ping in MRC reminders")
-    async def mrc_reminder_role_add(self, interaction: discord.Interaction, role: discord.Role):
-        try:
-            self.ensure_manager(interaction)
-            await interaction.response.defer(ephemeral=True)
-            if not interaction.guild:
-                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
-                return
-            self.db.add_reminder_role(interaction.guild.id, role.id)
-            await interaction.followup.send(f"Added {role.mention} to MRC reminder pings.", ephemeral=True)
-        except Exception as e:
-            await self.send_error(interaction, e)
-
-    @mrc_group.command(name="reminder_role_remove", description="Remove a role from MRC reminders")
-    async def mrc_reminder_role_remove(self, interaction: discord.Interaction, role: discord.Role):
-        try:
-            self.ensure_manager(interaction)
-            await interaction.response.defer(ephemeral=True)
-            if not interaction.guild:
-                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
-                return
-            removed = self.db.remove_reminder_role(interaction.guild.id, role.id)
-            if removed:
-                await interaction.followup.send(f"Removed {role.mention} from MRC reminder pings.", ephemeral=True)
-            else:
-                await interaction.followup.send(f"{role.mention} was not configured for MRC reminders.", ephemeral=True)
-        except Exception as e:
-            await self.send_error(interaction, e)
-
-    @mrc_group.command(name="reminder_role_list", description="List roles pinged in MRC reminders")
-    async def mrc_reminder_role_list(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        if not interaction.guild:
-            await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
-            return
-        roles = [interaction.guild.get_role(role_id) for role_id in self.db.get_reminder_roles(interaction.guild.id)]
-        role_mentions = [role.mention for role in roles if role]
-        await interaction.followup.send(
-            f"Reminder roles: {', '.join(role_mentions) if role_mentions else 'None'}",
-            ephemeral=True,
-        )
-
     @mrc_group.command(name="import", description="Bulk import MRC schedule from multiline text")
+    @app_commands.rename(
+        duration_hours="duration_hrs",
+        timezone_name="timezone",
+    )
     @app_commands.describe(
         schedule="Multiline schedule text. Format: April 25 1:00 PM Rounds 1-3 Upper",
-        duration_hours="Event duration in hours, such as 2 or 1.5",
+        duration_hours="Duration (hrs) for every imported event, such as 2 or 1.5",
         timezone_name="Default timezone for lines without a trailing timezone",
     )
     async def mrc_import(
@@ -570,8 +571,16 @@ class MRCCog(commands.Cog):
                             bracket,
                             duration_hours,
                             event_database_id,
+                            7,
                         )
                         self.db.update_mrc_match(guild.id, event_database_id, discord_event_id=event_id)
+                        created_match = self.db.get_mrc_match(guild.id, event_database_id)
+                        await self.post_mrc_created_message(
+                            guild,
+                            interaction.channel,
+                            created_match,
+                            self.build_discord_event_url(guild, event_id),
+                        )
                         imported += 1
                     except Exception as e:
                         if event_database_id is not None:
@@ -600,22 +609,23 @@ class MRCCog(commands.Cog):
         return await self.timezone_autocomplete(interaction, current)
 
     @mrc_group.command(name="add", description="Add a single MRC match")
-    @app_commands.describe(
-        datetime_str="Date and time (e.g., 'April 25 1:00 PM')",
-        rounds="Round group (e.g., 'Rounds 1-3' or '1-3')",
-        bracket="Upper or Lower bracket",
-        duration_hours="Event duration in hours, such as 2 or 1.5",
-        timezone_name="Timezone abbreviation or IANA name",
+    @app_commands.rename(
+        duration_hours="duration_hrs",
+        datetime_str="date_time",
     )
-    @app_commands.choices(bracket=BRACKET_CHOICES)
+    @app_commands.describe(
+        season="MRC season number",
+        duration_hours="Duration (hrs), such as 2 or 1.5",
+        datetime_str="Date & time, optionally with timezone (e.g., 4/20/26 3PM EST)",
+        name="Event name, such as Rounds 7-9 or Grand Finals",
+    )
     async def mrc_add(
         self,
         interaction: discord.Interaction,
-        datetime_str: str,
-        rounds: str,
-        bracket: str,
+        season: int,
         duration_hours: float,
-        timezone_name: Optional[str] = None,
+        datetime_str: str,
+        name: str,
     ):
         """Add a single MRC match."""
         try:
@@ -627,10 +637,14 @@ class MRCCog(commands.Cog):
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
                 return
 
-            used_timezone = normalize_timezone(timezone_name, self.get_default_timezone(guild.id))
+            if season <= 0:
+                raise ValueError("Season must be a positive number")
+            used_timezone = self.get_default_timezone(guild.id)
             duration_hours = validate_duration_hours(duration_hours)
             dt = self.parse_mrc_datetime(datetime_str, used_timezone)
-            round_group = self.normalize_round_group(rounds)
+            _, trailing_timezone = split_trailing_timezone(datetime_str)
+            used_timezone = normalize_timezone(trailing_timezone, used_timezone)
+            round_group, bracket = self.extract_optional_bracket(name)
 
             match_id = None
             match_id = self.db.add_mrc_match(
@@ -640,36 +654,51 @@ class MRCCog(commands.Cog):
                 bracket,
                 timezone_name=used_timezone,
                 duration_hours=duration_hours,
+                season=season,
             )
             try:
-                event_id = await self.create_discord_event(guild, dt, round_group, bracket, duration_hours, match_id)
+                event_id = await self.create_discord_event(
+                    guild,
+                    dt,
+                    round_group,
+                    bracket,
+                    duration_hours,
+                    match_id,
+                    season,
+                )
                 self.db.update_mrc_match(guild.id, match_id, discord_event_id=event_id)
             except Exception:
                 self.db.delete_mrc_match(guild.id, match_id)
                 raise
 
-            response = "**MRC Event Added**\n"
-            response += f"**Event ID:** {match_id}\n"
-            response += f"**Time:** {discord_time_display(to_utc_iso(dt), used_timezone)}\n"
-            response += f"**Round:** {round_group}\n"
-            response += f"**Bracket:** {bracket}\n"
-            response += f"**Duration:** {duration_hours:g} hour(s)\n"
-            response += f"**Status:** Scheduled"
-            await interaction.followup.send(response)
+            created_match = self.db.get_mrc_match(guild.id, match_id)
+            target_channel = self.get_mrc_event_channel(guild)
+            if target_channel:
+                await self.post_mrc_created_message(
+                    guild,
+                    interaction.channel,
+                    created_match,
+                    self.build_discord_event_url(guild, event_id),
+                )
+                await interaction.followup.send(f"MRC Event ID {self.format_public_id(match_id)} posted in {target_channel.mention}.")
+            else:
+                await interaction.followup.send(
+                    self.build_mrc_created_message(created_match, self.build_discord_event_url(guild, event_id))
+                )
         except Exception as e:
             await self.send_error(interaction, e)
 
-    @mrc_add.autocomplete("timezone_name")
-    async def mrc_add_timezone_autocomplete(self, interaction: discord.Interaction, current: str):
-        return await self.timezone_autocomplete(interaction, current)
-
     @mrc_group.command(name="session", description="Start an interactive session to add multiple matches")
-    @app_commands.describe(duration_hours="Event duration in hours for every match in this session")
-    async def mrc_session(self, interaction: discord.Interaction, duration_hours: float):
+    @app_commands.rename(duration_hours="duration_hrs")
+    @app_commands.describe(
+        season="MRC season number for every match in this session",
+        duration_hours="Duration (hrs) for every match in this session",
+    )
+    async def mrc_session(self, interaction: discord.Interaction, season: int, duration_hours: float):
         """Start interactive session for adding matches line by line."""
         try:
             self.ensure_manager(interaction)
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             guild = interaction.guild
             if not guild:
@@ -677,20 +706,28 @@ class MRCCog(commands.Cog):
                 return
 
             default_timezone = self.get_default_timezone(guild.id)
+            if season <= 0:
+                raise ValueError("Season must be a positive number")
             duration_hours = validate_duration_hours(duration_hours)
             user = interaction.user
             channel = interaction.channel
 
-            await channel.send(
-                f"**MRC Session started for {user.mention}**\n"
+            await interaction.followup.send(
+                f"**MRC Session started**\n"
                 f"Default timezone: `{default_timezone}`\n"
+                f"Season: `{season}`\n"
                 f"Duration: `{duration_hours:g}` hour(s)\n"
-                f"Enter MRC schedule lines one per message (format: 'April 25 1:00 PM Rounds 1-3 Upper')\n"
+                f"Enter MRC schedule lines one per message.\n"
+                f"Examples: `April 25 1:00 PM Rounds 1-3`, `4/20/26 3PM EST Rounds 7-9`, "
+                f"or `4/20/26 3PM EST Rounds 1-3 Upper`\n"
                 f"Type `done` when finished.\n"
-                f"Type `cancel` to abort."
+                f"Type `cancel` to abort.\n\n"
+                f"Only you can see this instruction message.",
+                ephemeral=True,
             )
 
             imported = 0
+            session_messages = []
 
             def check(msg):
                 return msg.author == user and msg.channel == channel
@@ -698,13 +735,19 @@ class MRCCog(commands.Cog):
             while True:
                 try:
                     msg = await self.bot.wait_for("message", check=check, timeout=300)
+                    session_messages.append(msg)
                     content = msg.content.strip()
 
                     if content.lower() == "done":
-                        await channel.send(f"**Session ended**\nSuccessfully imported: **{imported}** matches")
+                        await self.cleanup_session_messages(session_messages)
+                        await interaction.followup.send(
+                            f"**Session ended**\nSuccessfully imported: **{imported}** matches",
+                            ephemeral=True,
+                        )
                         break
                     if content.lower() == "cancel":
-                        await channel.send("Session cancelled.")
+                        await self.cleanup_session_messages(session_messages)
+                        await interaction.followup.send("Session cancelled.", ephemeral=True)
                         break
 
                     parsed = self.parse_mrc_line(content, default_timezone)
@@ -719,6 +762,7 @@ class MRCCog(commands.Cog):
                                 bracket,
                                 timezone_name=used_timezone,
                                 duration_hours=duration_hours,
+                                season=season,
                             )
                             event_id = await self.create_discord_event(
                                 guild,
@@ -727,18 +771,31 @@ class MRCCog(commands.Cog):
                                 bracket,
                                 duration_hours,
                                 event_database_id,
+                                season,
                             )
                             self.db.update_mrc_match(guild.id, event_database_id, discord_event_id=event_id)
+                            created_match = self.db.get_mrc_match(guild.id, event_database_id)
+                            await self.post_mrc_created_message(
+                                guild,
+                                channel,
+                                created_match,
+                                self.build_discord_event_url(guild, event_id),
+                            )
                             imported += 1
                             await msg.add_reaction("\N{WHITE HEAVY CHECK MARK}")
                         except Exception as e:
                             if event_database_id is not None:
                                 self.db.delete_mrc_match(guild.id, event_database_id)
-                            await msg.reply(f"Warning: {str(e)}")
+                            await interaction.followup.send(f"Warning: {str(e)}", ephemeral=True)
                     else:
-                        await msg.reply("Could not parse. Use format: 'April 25 1:00 PM Rounds 1-3 Upper'")
+                        await interaction.followup.send(
+                            "Could not parse. Use a format like `April 25 1:00 PM Rounds 1-3` "
+                            "or `4/20/26 3PM EST Rounds 7-9`.",
+                            ephemeral=True,
+                        )
                 except discord.errors.WaitTimeoutError:
-                    await channel.send("Session timeout. Ending session.")
+                    await self.cleanup_session_messages(session_messages)
+                    await interaction.followup.send("Session timeout. Ending session.", ephemeral=True)
                     break
         except Exception as e:
             await self.send_error(interaction, e)
@@ -755,7 +812,7 @@ class MRCCog(commands.Cog):
         include_archived: bool = False,
     ):
         """Display all MRC matches for the guild."""
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -771,7 +828,7 @@ class MRCCog(commands.Cog):
             return
 
         view = MRCMatchPageView(self, matches, "MRC Schedule")
-        await interaction.followup.send(embed=view.build_embed(), view=view)
+        await interaction.followup.send(embed=view.build_embed(), view=view, ephemeral=True)
 
     @mrc_group.command(name="upcoming", description="View upcoming MRC matches")
     @app_commands.describe(
@@ -786,7 +843,7 @@ class MRCCog(commands.Cog):
         include_completed: bool = False,
         include_archived: bool = False,
     ):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
@@ -804,38 +861,7 @@ class MRCCog(commands.Cog):
             return
 
         view = MRCMatchPageView(self, matches, f"Upcoming MRC Events ({days} days)")
-        await interaction.followup.send(embed=view.build_embed(), view=view)
-
-    @mrc_group.command(name="edit", description="Edit an existing MRC match")
-    @app_commands.describe(
-        event_id="Event ID to edit",
-    )
-    async def mrc_edit(
-        self,
-        interaction: discord.Interaction,
-        event_id: int,
-    ):
-        """Open a prefilled modal to edit an existing MRC match."""
-        try:
-            self.ensure_manager(interaction)
-
-            guild = interaction.guild
-            if not guild:
-                await interaction.response.send_message("Error: This command can only be used in a server.", ephemeral=True)
-                return
-
-            match = self.db.get_mrc_match(guild.id, event_id)
-            if not match:
-                await interaction.response.send_message(f"Event ID {event_id} not found.", ephemeral=True)
-                return
-
-            await interaction.response.send_modal(MRCEditModal(self, guild.id, match))
-        except Exception as e:
-            await self.send_error(interaction, e)
-
-    @mrc_edit.autocomplete("event_id")
-    async def mrc_edit_match_autocomplete(self, interaction: discord.Interaction, current: str):
-        return await self.match_id_autocomplete(interaction, current)
+        await interaction.followup.send(embed=view.build_embed(), view=view, ephemeral=True)
 
     @mrc_group.command(name="status", description="Set an MRC match status")
     @app_commands.describe(event_id="Event ID to update")
@@ -843,7 +869,7 @@ class MRCCog(commands.Cog):
     async def mrc_status(
         self,
         interaction: discord.Interaction,
-        event_id: int,
+        event_id: str,
         status: str,
     ):
         try:
@@ -853,13 +879,14 @@ class MRCCog(commands.Cog):
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
                 return
-            match = self.db.get_mrc_match(guild.id, event_id)
+            event_database_id = self.parse_public_id(event_id)
+            match = self.db.get_mrc_match(guild.id, event_database_id)
             if not match:
-                await interaction.followup.send(f"Event ID {event_id} not found.", ephemeral=True)
+                await interaction.followup.send(f"Event ID {self.format_public_id(event_database_id)} not found.", ephemeral=True)
                 return
             status = self.normalize_status(status)
-            self.db.update_mrc_match(guild.id, event_id, status=status)
-            updated = self.db.get_mrc_match(guild.id, event_id)
+            self.db.update_mrc_match(guild.id, event_database_id, status=status)
+            updated = self.db.get_mrc_match(guild.id, event_database_id)
             if updated["discord_event_id"]:
                 await self.update_discord_event(
                     guild,
@@ -869,6 +896,7 @@ class MRCCog(commands.Cog):
                     updated["bracket"],
                     updated["duration_hours"],
                     updated["id"],
+                    updated.get("season", 7),
                 )
             await interaction.followup.send(f"**Event Status Updated**\n{self.build_match_line(updated)}")
         except Exception as e:
@@ -930,6 +958,7 @@ class MRCCog(commands.Cog):
                         match["bracket"],
                         match["duration_hours"],
                         match["id"],
+                        match.get("season", 7),
                     )
                     continue
 
@@ -943,11 +972,12 @@ class MRCCog(commands.Cog):
                         match["bracket"],
                         match["duration_hours"],
                         match["id"],
+                        match.get("season", 7),
                     )
                     self.db.update_mrc_match(guild.id, match["id"], discord_event_id=event_id)
                     repaired += 1
                 except Exception as exc:
-                    failed.append(f"Event ID {match['id']}: {str(exc)}")
+                    failed.append(f"Event ID {self.format_public_id(match)}: {str(exc)}")
 
             response = "**MRC Event Repair Complete**\n"
             response += f"Checked: {checked}\n"
@@ -963,7 +993,7 @@ class MRCCog(commands.Cog):
 
     @mrc_group.command(name="delete", description="Delete an MRC match")
     @app_commands.describe(event_id="Event ID to delete")
-    async def mrc_delete(self, interaction: discord.Interaction, event_id: int):
+    async def mrc_delete(self, interaction: discord.Interaction, event_id: str):
         """Delete an MRC match and its Discord event."""
         try:
             self.ensure_manager(interaction)
@@ -974,16 +1004,17 @@ class MRCCog(commands.Cog):
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
                 return
 
-            match = self.db.get_mrc_match(guild.id, event_id)
+            event_database_id = self.parse_public_id(event_id)
+            match = self.db.get_mrc_match(guild.id, event_database_id)
             if not match:
-                await interaction.followup.send(f"Event ID {event_id} not found.", ephemeral=True)
+                await interaction.followup.send(f"Event ID {self.format_public_id(event_database_id)} not found.", ephemeral=True)
                 return
 
             if match["discord_event_id"]:
                 await self.delete_discord_event(guild, match["discord_event_id"])
 
-            self.db.delete_mrc_match(guild.id, event_id)
-            await interaction.followup.send(f"Event ID {event_id} deleted.")
+            self.db.delete_mrc_match(guild.id, event_database_id)
+            await interaction.followup.send(f"Event ID {self.format_public_id(event_database_id)} deleted.")
         except Exception as e:
             await self.send_error(interaction, e)
 
@@ -1025,11 +1056,13 @@ class MRCCog(commands.Cog):
                 message += (
                     f"**MRC match starts in 30 minutes**\n"
                     f"**Time:** {discord_time_display(match['datetime'], match['timezone'])}\n"
+                    f"**Season:** {match.get('season', 7)}\n"
                     f"**Round:** {match['round_group']}\n"
-                    f"**Bracket:** {match['bracket']}\n"
                     f"**Duration:** {match['duration_hours']:g} hour(s)\n"
                     f"**Status:** {match['status']}"
                 )
+                if match.get("bracket"):
+                    message += f"\n**Bracket:** {match['bracket']}"
                 if event_url:
                     message += f"\n**Event:** {event_url}"
 

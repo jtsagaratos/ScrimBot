@@ -23,8 +23,14 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            print(f"Synced {len(synced)} command(s) to guild {GUILD_ID}")
+        else:
+            synced = await bot.tree.sync()
+            print(f"Synced {len(synced)} global command(s)")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
