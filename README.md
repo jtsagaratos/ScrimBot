@@ -1,283 +1,191 @@
 # ScrimBot User Guide
 
-ScrimBot is a Discord bot for scrims, MRC event scheduling, Ignite result tracking, reminders, and upcoming schedule views. It creates Discord Scheduled Events, stores data per server, and shows Discord-native timestamps so every player sees local times in their own timezone.
+ScrimBot helps Discord communities schedule scrims, MRC matches, tournaments, reminders, and Ignite result posts. It creates Discord Scheduled Events, keeps each server's settings separate, and uses Discord timestamps so players see times in their own local timezone.
 
-## What The Bot Does
+## What ScrimBot Does
 
-- Create scrim events against plain-text opponent names.
-- Add, import, edit, view, archive, and delete MRC events.
-- Send 30-minute MRC, scrim, and tournament reminders to a configured channel.
-- Ping configured reminder roles.
-- Show upcoming MRC events and scrims.
-- Track Ignite results from Liquipedia and auto-post new results.
-- Keep settings independent per Discord server.
-- Let configured manager roles operate the bot without full admin permissions.
+- Creates Discord Scheduled Events for scrims, MRC matches, and tournaments.
+- Posts new events into the channels you choose during setup.
+- Sends reminder pings before events using your selected reminder lead time.
+- Lets you choose reminder roles once for MRC, scrims, and tournaments.
+- Tracks event status: Scheduled, Checked In, In Progress, Completed, or Cancelled.
+- Shows private schedule views so commands do not clutter public channels.
+- Edits MRC, scrim, and tournament events from one shared `/edit` command.
+- Tracks Ignite results from Liquipedia and posts new results automatically.
+- Keeps settings and schedules independent per Discord server.
 
-## Install And Run
+## Quick Start
 
-### Requirements
+### 1. Install Python Dependencies
 
-- Python 3.9 or newer
-- A Discord bot token
-- Bot permissions:
-  - View Channels
-  - Send Messages
-  - Read Message History
-  - Manage Events / Create Events
-  - Use Application Commands
-
-### Install
-
-```bash
-cd ScrimBot
-python -m venv venv
-```
-
-Windows:
-
-```bash
-venv\Scripts\activate
-```
-
-macOS/Linux:
-
-```bash
-source venv/bin/activate
-```
-
-Install dependencies:
+Use Python 3.9 or newer.
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-### Configure Token
+### 2. Add Your Discord Token
 
-Copy the env template:
+Copy the example environment file:
 
 ```bash
 copy .env.example .env
 ```
 
-macOS/Linux:
+On macOS/Linux:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Open `.env` and add your token:
 
 ```env
 DISCORD_TOKEN=your_actual_bot_token_here
 GUILD_ID=0
 ```
 
-For fastest command updates while testing, set `GUILD_ID` to your Discord server ID. With `GUILD_ID=0`, the bot syncs slash commands globally, which can take longer to appear in Discord.
+For testing, set `GUILD_ID` to your Discord server ID. This makes slash command updates appear much faster. If `GUILD_ID=0`, Discord may take longer to show new global slash commands.
 
-Use `/setup` to open the interactive setup panel for channels, roles, timezone, and Ignite settings.
-
-### Start The Bot
+### 3. Start The Bot
 
 ```bash
 python main.py
 ```
 
-Expected output:
+You should see something like:
 
 ```text
-YourBotName has connected to Discord!
+MRC Bot#6950 has connected to Discord!
 Synced X command(s)
 ```
 
-## First-Time Server Setup
+### 4. Run Setup In Discord
 
-Run `/setup` in the Discord server where you want to use the bot. It opens an interactive setup panel with buttons, role menus, channel menus, and text prompts.
-
-Open setup:
+In your server, run:
 
 ```text
 /setup
 ```
 
-From there you can configure:
+Use this setup panel to configure the bot. Most bot settings live here so admins do not need to remember many setup commands.
 
-- Default timezone
-- Manager roles
-- Shared reminder channel and lead time for MRC, scrims, and tournaments
-- MRC event posting channel
-- Reminder roles for MRC, scrims, and tournaments
-- Scrim/tournament event posting channel
-- Scrim ping roles
-- Ignite result channel
-- Ignite source URL
-- Ignite tracked team
-- Ignite auto-posting
+## Bot Permissions
 
-### 1. Set Manager Roles
+When inviting the bot, give it:
 
-This lets staff manage the bot without needing full Discord admin permissions.
+- View Channels
+- Send Messages
+- Read Message History
+- Manage Events or Create Events
+- Use Application Commands
 
-Use `/setup`, choose **Roles**, then use the **Check manager roles** menu. Checked roles are managers; unchecked roles are removed from the manager list.
+Invite it with the `bot` and `applications.commands` scopes.
 
-### 2. Set The Default Timezone
+## First-Time Setup
 
-Use your main tournament timezone.
+Run `/setup`, then work through these sections.
 
-Use `/setup`, choose **Timezone**, then enter a timezone.
+### Timezone
 
-You can also use abbreviations like `EST`, `PST`, `UTC`, `MT`, or full IANA names like `Europe/London`.
+Set the server's default timezone. This is used when a command does not include a timezone.
 
-### 3. Set The Shared Reminder Channel
-
-Use `/setup`, choose **Channels**, then choose the reminder channel. MRC, scrim, and tournament 30-minute reminders use this channel.
-
-To change when reminders are sent, use `/setup`, choose **Roles**, then choose the reminder lead time. Options are 15 minutes, 30 minutes, 45 minutes, or 1 hour.
-
-### 4. Set Event Posting Channels
-
-Use `/setup`, choose **Channels**, then choose the MRC event channel, scrim event channel, and tournament event channel. New events are posted in their respective channels when staff create them.
-
-### 5. Add Reminder Ping Roles
-
-Use `/setup`, choose **Roles**, then use the **Check reminder roles** menu. Checked roles receive MRC, scrim, and tournament reminders; unchecked roles are removed.
-
-### 6. Set Up Ignite Results
-
-Use `/setup`, choose **Channels** for the result channel, then choose **Ignite** for source/team/auto-posting.
-
-Optional: only post results for one team.
-
-Use `/setup`, choose **Ignite**, then choose **Source / Team**.
-
-Enable auto-posting:
-
-Use `/setup`, choose **Ignite**, then choose **Toggle Auto**.
-
-Check Ignite setup:
-
-Use `/setup` again to review the current setup summary.
-
-### 7. Check Bot Health
+Examples:
 
 ```text
-/health
+America/Denver
+America/New_York
+Europe/London
+UTC
+EST
+PST
 ```
 
-This checks the database, background tasks, Ignite source reachability, and Discord latency.
+### Roles
 
-## Common Workflows
+Use the Roles page to configure:
 
-### Schedule One Scrim
+- Manager Roles: people who can create, edit, delete, archive, and configure events.
+- Reminder Roles: roles that get pinged for MRC, scrim, and tournament reminders.
+- Reminder Lead Time: choose 15 minutes, 30 minutes, 45 minutes, or 1 hour.
 
-The team name is plain text. The opponent does not need a Discord role.
+The role menus use checkmarks. Check a role to add it, uncheck it to remove it.
+
+### Channels
+
+Use the Channels page to choose:
+
+- Reminder Channel: where MRC, scrim, and tournament reminders are sent.
+- MRC Event Channel: where new MRC event posts go.
+- Scrim Event Channel: where new scrim event posts go.
+- Tournament Event Channel: where new tournament event posts go.
+
+Command confirmations are private to the user who ran the command. The public channels only receive the actual event posts and reminder pings.
+
+### Ignite
+
+Use the Ignite page to choose:
+
+- Ignite Results Channel
+- Liquipedia source URL
+- Optional tracked team filter
+- Auto-post on or off
+
+If a tracked team is set, the bot only posts Ignite results where that team appears.
+
+## Daily Commands
+
+### Create A Scrim
+
+Use `/scrims create`.
 
 ```text
-/scrims create team:"Team1" date_time:"4/22/26 4pm EST" duration_hrs:2
+/scrims create team:"Vengeful" date_time:"4/22/26 4pm EST" duration_hrs:2
 ```
 
-With a timezone override:
+With an explicit timezone:
 
 ```text
-/scrims create team:"Team1" date_time:"April 22 4:00 PM" duration_hrs:2 timezone:"America/Denver"
+/scrims create team:"Vengeful" date_time:"April 22 4:00 PM" duration_hrs:2 timezone:"America/Denver"
 ```
 
-The bot creates a Discord Scheduled Event with the required duration and stores the scrim for `/upcoming`.
-The Discord event description includes the bot's prefixed `Event ID`. Scrim IDs start with `S`, like `S1`.
+Scrim Event IDs start with `S`, such as `S1`.
 
-Edit a scrim later:
+### Create A Tournament
 
-```text
-/edit event_id:S1
-```
-
-Manage scrims like MRC events:
-
-```text
-/scrims view
-/scrims upcoming days:14
-/scrims status event_id:S1 status:"Completed"
-/scrims delete event_id:S1
-```
-
-Set roles to ping for scrim reminders:
-
-```text
-/setup
-```
-
-Choose **Roles**, then check the shared reminder roles.
-
-### Schedule One Tournament
-
-Tournament names are plain text and use `T` event IDs.
+Use `/tournaments create`.
 
 ```text
 /tournaments create name:"Ignite Qualifier" date_time:"4/24/26 6pm EST" duration_hrs:3
 ```
 
-Edit a tournament later:
-
-```text
-/edit event_id:T1
-```
-
-Manage tournaments:
-
-```text
-/tournaments view
-/tournaments upcoming days:14
-/tournaments status event_id:T1 status:"Completed"
-/tournaments delete event_id:T1
-```
+Tournament Event IDs start with `T`, such as `T1`.
 
 ### Add One MRC Event
+
+Use `/mrc add`.
 
 ```text
 /mrc add season:7 duration_hrs:2 date_time:"April 25 1:00 PM" name:"Rounds 1-3"
 ```
 
-Put the timezone in the date/time when needed:
+Numeric dates and timezone abbreviations also work:
 
 ```text
 /mrc add season:7 duration_hrs:2 date_time:"4/20/26 3PM EST" name:"Rounds 7-9"
 ```
 
-The name can be any title:
+MRC Event IDs start with `M`, such as `M1`.
 
-```text
-/mrc add season:7 duration_hrs:2 date_time:"April 25 7:00 PM America/Denver" name:"Grand Finals"
-```
+### Add Multiple MRC Events In A Session
 
-### Bulk Import MRC Events
-
-Use `/mrc import` with a required duration, then paste lines in this format:
-
-```text
-/mrc import schedule:"April 25 1:00 PM Rounds 1-3 Upper" duration_hrs:2
-```
-
-```text
-April 25 1:00 PM Rounds 1-3 Upper
-April 25 4:00 PM Rounds 1-3 Upper
-April 25 7:00 PM Rounds 1-3 Lower
-April 25 9:00 PM Rounds 7-9
-```
-
-Lines can include a timezone before or after the title:
-
-```text
-April 25 1:00 PM America/Denver Rounds 1-3 Upper
-April 25 1:00 PM Rounds 1-3 Upper America/Denver
-April 25 4:00 PM Rounds 1-3 Lower PST
-```
-
-### Add MRC Events Interactively
+Use `/mrc session` when you want to type several MRC dates one at a time.
 
 ```text
 /mrc session season:7 duration_hrs:2
 ```
 
-Then send one line at a time:
+Then type one event per message:
 
 ```text
 April 25 1:00 PM Rounds 1-3
@@ -286,315 +194,295 @@ April 25 4:00 PM Rounds 1-3 Upper
 done
 ```
 
-The text after the date/time becomes the event title. A final `Upper` or `Lower` is optional. Use `cancel` to stop.
+Use `cancel` to stop without continuing. The setup/instruction messages are private, and the bot tries to clean up the schedule lines you typed when the session ends.
 
-### View The Schedule
+### Bulk Import MRC Events
+
+Use `/mrc import` for a pasted schedule.
+
+```text
+/mrc import schedule:"April 25 1:00 PM Rounds 1-3 Upper" duration_hrs:2
+```
+
+The pasted schedule can contain multiple lines:
+
+```text
+April 25 1:00 PM Rounds 1-3 Upper
+April 25 4:00 PM Rounds 4-6 Upper
+April 25 7:00 PM Rounds 7-9
+April 26 6:00 PM Grand Finals
+```
+
+The final `Upper` or `Lower` is optional.
+
+## Viewing Schedules
+
+These commands are private to the user who runs them.
 
 ```text
 /mrc view
+/scrims view
+/tournaments view
+/upcoming days:14
 ```
 
-By default this hides completed, cancelled, and archived events.
-
-Show completed/cancelled:
-
-```text
-/mrc view include_completed:true
-```
-
-Show archived:
-
-```text
-/mrc view include_archived:true
-```
-
-Long schedules have Previous/Next buttons.
-
-### View Upcoming Items
-
-MRC events only:
+Use upcoming commands for one event type:
 
 ```text
 /mrc upcoming days:14
+/scrims upcoming days:14
+/tournaments upcoming days:14
 ```
 
-MRC events and scrims together:
+Use the shared upcoming command to see MRC, scrims, and tournaments together:
 
 ```text
 /upcoming days:14
 ```
 
-### Edit An Event
+Schedule views show the event title first and place the Event ID at the bottom.
+
+## Editing Events
+
+Use one shared command for everything:
 
 ```text
 /edit event_id:M1
+/edit event_id:S1
+/edit event_id:T1
 ```
 
-Discord opens a prefilled form with:
+The letter tells the bot what kind of event to edit:
 
-- Date/Time
-- Timezone
-- Duration Hours
-- Rounds
-- Bracket
+- `M` means MRC
+- `S` means scrim
+- `T` means tournament
 
-Submit the form to update the database and the linked Discord Scheduled Event.
-Use `/mrc status` to change event status.
-The linked Discord Scheduled Event description includes the bot's prefixed `Event ID`. MRC IDs start with `M`, like `M1`.
+Discord opens a form with the current event details. Submit the form to update both the database and the linked Discord Scheduled Event.
 
-### Change Event Status
+## Changing Status
+
+Set status with the matching command group:
 
 ```text
-/mrc status event_id:M1 status:"In Progress"
 /mrc status event_id:M1 status:"Completed"
+/scrims status event_id:S1 status:"In Progress"
+/tournaments status event_id:T1 status:"Cancelled"
 ```
 
 Supported statuses:
 
-- `Scheduled`
-- `Checked In`
-- `In Progress`
-- `Completed`
-- `Cancelled`
+- Scheduled
+- Checked In
+- In Progress
+- Completed
+- Cancelled
 
-### Archive Completed Events
+## Deleting Events
 
-```text
-/mrc archive_completed
-```
-
-This archives completed and cancelled events so normal schedule views stay clean.
-
-### Repair Missing Discord Events
-
-If Discord Scheduled Events were deleted manually, recreate them:
-
-```text
-/mrc repair_events
-```
-
-Include completed/cancelled events:
-
-```text
-/mrc repair_events include_completed:true
-```
-
-### Delete An MRC Event
+Delete commands remove both the bot database entry and the linked Discord Scheduled Event.
 
 ```text
 /mrc delete event_id:M1
+/scrims delete event_id:S1
+/tournaments delete event_id:T1
 ```
 
-This deletes the database match and its linked Discord Scheduled Event.
+## Archiving Completed Events
 
-### Manually Check Ignite
+Archive completed or cancelled events to keep normal views clean.
+
+```text
+/mrc archive_completed
+/scrims archive_completed
+/tournaments archive_completed
+```
+
+Archived events stay in the database, but normal views hide them unless you ask to include archived events.
+
+## Repairing Discord Scheduled Events
+
+Use repair commands if someone manually deletes a Discord Scheduled Event but the bot still has it in the database.
+
+```text
+/mrc repair_events
+/scrims repair_events
+/tournaments repair_events
+```
+
+## Ignite Result Tracking
+
+Ignite setup is inside `/setup` under the Ignite section.
+
+After setup, you can manually check Liquipedia:
 
 ```text
 /ignite check_now
 ```
 
-This checks the configured Liquipedia page immediately and posts new results if auto-posting is enabled and a channel is configured.
+When auto-posting is enabled, the bot checks the configured Liquipedia source every few minutes and posts new results to the Ignite Results Channel. It avoids duplicate posts using stored match keys.
 
-## Timezones And Local Times
+## Timezones
 
-The bot stores scheduled times in UTC internally and displays:
+The bot stores times in UTC internally and displays Discord native timestamps. That means each player sees the time in their own Discord-local timezone.
 
-- the scheduled/event timezone
-- a Discord native timestamp
-- a relative timestamp
-
-Discord native timestamps render in each player's local timezone. A Denver player, a London player, and a Sydney player will each see the local timestamp in their own timezone.
-
-Example output shape:
+Example:
 
 ```text
-Saturday, April 25, 2026 at 01:00 PM MDT
-Local: <t:1777143600:F> (<t:1777143600:R>)
+Time: Wednesday, April 22, 2026 at 10:00 PM EDT
+Local: Wednesday, April 22, 2026 8:00 PM (in a day)
 ```
 
-In Discord, the `<t:...>` parts render as real local times.
+Players in other regions will see the local timestamp converted for them by Discord.
 
 ## Command Reference
 
-### Setup
-
-Use `/setup` first. It opens an interactive setup panel for timezone, manager roles, the shared reminder channel, MRC event channel, scrim event channel, tournament event channel, reminder roles, and Ignite posting settings.
+### Setup And Health
 
 | Command | What It Does |
 | --- | --- |
-| `/setup` | Opens the interactive setup panel. |
+| `/setup` | Opens the setup panel for timezone, roles, channels, reminders, and Ignite. |
+| `/health` | Checks database, background tasks, Ignite source status, and latency. |
+| `/upcoming days` | Shows upcoming MRC, scrim, and tournament events together. |
+| `/edit event_id` | Opens the edit form for `M#`, `S#`, or `T#` events. |
 
-### Bot Health
+### MRC
 
 | Command | What It Does |
 | --- | --- |
-| `/health` | Checks database, task, Ignite, and latency health. |
+| `/mrc add` | Adds one MRC event. |
+| `/mrc import` | Bulk imports multiple MRC events from pasted text. |
+| `/mrc session` | Starts an interactive MRC entry session. |
+| `/mrc view` | Shows MRC events with pagination. |
+| `/mrc upcoming` | Shows upcoming MRC events. |
+| `/mrc status` | Changes MRC event status. |
+| `/mrc archive_completed` | Archives completed/cancelled MRC events. |
+| `/mrc repair_events` | Recreates missing Discord Scheduled Events for MRC. |
+| `/mrc delete` | Deletes an MRC event. |
 
 ### Scrims
 
 | Command | What It Does |
 | --- | --- |
-| `/scrims create team date_time duration_hrs` | Creates a scrim Scheduled Event against a plain-text opponent. |
-| `/scrims view` | Shows active scrim events with pagination. |
+| `/scrims create` | Creates a scrim event against a plain-text opponent. |
+| `/scrims view` | Shows scrim events with pagination. |
 | `/scrims upcoming` | Shows upcoming scrim events. |
-| `/scrims status event_id status` | Sets scrim event status. |
-| `/scrims archive_completed` | Archives completed/cancelled scrim events. |
+| `/scrims status` | Changes scrim event status. |
+| `/scrims archive_completed` | Archives completed/cancelled scrims. |
 | `/scrims repair_events` | Recreates missing Discord Scheduled Events for scrims. |
-| `/scrims delete event_id` | Deletes a scrim and its linked event. |
-| `/upcoming days:14` | Shows upcoming MRC events, scrims, and tournaments together. |
+| `/scrims delete` | Deletes a scrim event. |
 
 ### Tournaments
 
 | Command | What It Does |
 | --- | --- |
-| `/tournaments create name date_time duration_hrs` | Creates a tournament Scheduled Event. |
-| `/tournaments view` | Shows active tournament events with pagination. |
+| `/tournaments create` | Creates a tournament event. |
+| `/tournaments view` | Shows tournament events with pagination. |
 | `/tournaments upcoming` | Shows upcoming tournament events. |
-| `/tournaments status event_id status` | Sets tournament event status. |
-| `/tournaments archive_completed` | Archives completed/cancelled tournament events. |
+| `/tournaments status` | Changes tournament event status. |
+| `/tournaments archive_completed` | Archives completed/cancelled tournaments. |
 | `/tournaments repair_events` | Recreates missing Discord Scheduled Events for tournaments. |
-| `/tournaments delete event_id` | Deletes a tournament and its linked event. |
-
-### MRC Scheduling
-
-| Command | What It Does |
-| --- | --- |
-| `/mrc add season duration_hrs date_time name` | Adds one MRC event. The name becomes the Scheduled Event title after `MRC S# -`. |
-| `/mrc import` | Bulk imports many MRC events from pasted text with one required duration for all imported events. |
-| `/mrc session season duration_hrs` | Adds events one by one in chat with one required season and duration for the session. |
-| `/mrc view` | Shows active MRC events with pagination. |
-| `/mrc upcoming` | Shows upcoming MRC events. |
-| `/mrc status` | Sets event status. |
-| `/mrc archive_completed` | Archives completed/cancelled events. |
-| `/mrc repair_events` | Recreates missing Discord Scheduled Events. |
-| `/mrc delete` | Deletes an event and its linked Discord Scheduled Event. |
-
-### Shared Event Actions
-
-| Command | What It Does |
-| --- | --- |
-| `/edit event_id` | Opens the correct edit form for `M#` MRC IDs, `S#` scrim IDs, or `T#` tournament IDs. |
+| `/tournaments delete` | Deletes a tournament event. |
 
 ### Ignite
 
 | Command | What It Does |
 | --- | --- |
-| `/ignite check_now` | Checks Liquipedia immediately. |
+| `/ignite check_now` | Manually checks the configured Liquipedia page for new Ignite results. |
 
-## Permissions
+## Who Can Use Admin Commands?
 
-Users can manage schedule/config commands if they have any of:
+Users can manage setup and event-management commands if they have any of:
 
 - Administrator
 - Manage Server
 - Manage Events
-- any configured manager role from `/setup`
+- Any Manager Role configured in `/setup`
 
-The bot itself needs:
+Schedule viewing commands are available to regular users:
 
-- View Channels
-- Send Messages
-- Read Message History
-- Manage Events / Create Events
-- Use Application Commands
+- `/mrc view`
+- `/mrc upcoming`
+- `/scrims view`
+- `/scrims upcoming`
+- `/tournaments view`
+- `/tournaments upcoming`
+- `/upcoming`
+- `/health`
 
-## Per-Server Behavior
+## Per-Server Settings
 
-All main data is separated by Discord server:
+Each Discord server has its own:
 
 - MRC events
-- scrims
-- tournaments
-- shared reminder channel
-- MRC event posting channel
-- scrim event posting channel
-- tournament event posting channel
-- reminder roles
-- manager roles
-- default timezone
+- Scrims
+- Tournaments
+- Manager roles
+- Reminder roles
+- Reminder channel
+- Reminder lead time
+- MRC event channel
+- Scrim event channel
+- Tournament event channel
+- Default timezone
 - Ignite channel
 - Ignite source URL
 - Ignite tracked team
 - Ignite posted-result history
 
-Changes in one server do not affect another server.
+Changing setup in one server does not affect another server.
 
 ## Troubleshooting
 
 ### Slash Commands Do Not Show Up
 
 - Restart the bot.
-- Wait a minute or two.
+- Press `Ctrl+R` in Discord.
 - Check the console for `Synced X command(s)`.
+- Set `GUILD_ID` in `.env` while testing.
 - Make sure the bot was invited with the `applications.commands` scope.
 
-### Bot Cannot Create Events
+### Bot Cannot Create Scheduled Events
 
-- Give the bot Manage Events / Create Events permissions.
-- Make sure the bot role is high enough in the server role hierarchy.
+- Give the bot Manage Events or Create Events permission.
+- Make sure the bot can view the channel where you are running commands.
+- Make sure the bot's role is high enough in the server role list.
 
-### MRC Import Fails
+### Reminders Do Not Ping
 
-Use this format:
+Check `/setup`:
 
-```text
-April 25 1:00 PM Rounds 1-3
-4/20/26 3PM EST Rounds 7-9
-```
-
-Required:
-
-- month name or numeric date
-- day
-- 12-hour time with AM/PM
-- event title text after the date/time
-
-Optional:
-
-- timezone abbreviation or IANA timezone, such as `EST` or `America/Denver`
-- a final `Upper` or `Lower` bracket label
-
-### Reminder Pings Do Not Happen
-
-Add at least one reminder role:
-
-```text
-/setup
-```
-
-Choose **Roles**, then check at least one reminder role.
+- Reminder Channel is set or the bot can post in the command channel.
+- Reminder Roles are checked.
+- Reminder Lead Time is set.
+- The event is not Completed or Cancelled.
 
 ### Ignite Does Not Post
 
-Check:
+Check `/setup` and `/health`:
 
-```text
-/setup
-/health
-```
+- Ignite Results Channel is set.
+- Ignite auto-posting is enabled.
+- Liquipedia source URL is correct.
+- Tracked Team is blank or matches the team name you expect.
 
-Make sure:
+### MRC Session Times Out
 
-- auto-posting is enabled
-- a channel is set
-- the source URL is reachable
-- tracked team is not filtering out all results
+The interactive `/mrc session` waits for typed messages for a limited time. If it times out, run the command again and continue entering the schedule.
 
-### First Ignite Run Posts Old Results
-
-The bot posts anything not already stored in its database. On a new database, existing Liquipedia results may be treated as new. To avoid this in the future, add a baseline command that marks current results as seen without posting.
-
-## Files
+## Project Files
 
 ```text
 ScrimBot/
 |-- main.py
 |-- cogs/
 |   |-- config.py
+|   |-- events.py
 |   |-- health.py
 |   |-- ignite.py
 |   |-- mrc.py
 |   |-- scrim.py
+|   |-- tournaments.py
 |   `-- upcoming.py
 |-- models/
 |   |-- database.py
@@ -608,17 +496,10 @@ ScrimBot/
 `-- README.md
 ```
 
-`bot_data.db` is created automatically when the bot runs.
+`bot_data.db` is created automatically when the bot runs. Back it up if your schedule data matters.
 
 ## Run Tests
 
 ```bash
 python -m unittest discover -s tests
 ```
-
-## Notes For Operators
-
-- Back up `bot_data.db` if the bot becomes important for multiple servers.
-- Use `/health` after changing Ignite source URLs.
-- Use `/mrc archive_completed` regularly to keep schedule views clean.
-- Use `/mrc repair_events` if someone manually deletes Discord Scheduled Events.
