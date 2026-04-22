@@ -20,24 +20,53 @@ class ConfigCog(commands.Cog):
         else:
             await interaction.response.send_message(message, ephemeral=True)
 
-    @config_group.command(name="manager_role", description="Set the role allowed to manage bot commands")
+    @config_group.command(name="manager_role", description="Add a role allowed to manage bot commands")
     async def config_manager_role(self, interaction: discord.Interaction, role: discord.Role):
         try:
             ensure_manager(interaction, self.db)
             await interaction.response.defer(ephemeral=True)
-            self.db.update_guild_settings(interaction.guild.id, manager_role_id=role.id)
-            await interaction.followup.send(f"Manager role set to {role.mention}.", ephemeral=True)
+            self.db.add_manager_role(interaction.guild.id, role.id)
+            await interaction.followup.send(f"Added manager role {role.mention}.", ephemeral=True)
         except Exception as exc:
             await self.send_error(interaction, exc)
 
-    @config_group.command(name="clear_manager_role", description="Clear the configured manager role")
+    @config_group.command(name="remove_manager_role", description="Remove a configured manager role")
+    async def config_remove_manager_role(self, interaction: discord.Interaction, role: discord.Role):
+        try:
+            ensure_manager(interaction, self.db)
+            await interaction.response.defer(ephemeral=True)
+            removed = self.db.remove_manager_role(interaction.guild.id, role.id)
+            if removed:
+                await interaction.followup.send(f"Removed manager role {role.mention}.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"{role.mention} was not configured as a manager role.", ephemeral=True)
+        except Exception as exc:
+            await self.send_error(interaction, exc)
+
+    @config_group.command(name="clear_manager_role", description="Clear all configured manager roles")
     async def config_clear_manager_role(self, interaction: discord.Interaction):
         try:
             ensure_manager(interaction, self.db)
             await interaction.response.defer(ephemeral=True)
-            self.db.get_guild_settings(interaction.guild.id)
+            removed = self.db.clear_manager_roles(interaction.guild.id)
             self.db.update_guild_settings(interaction.guild.id, manager_role_id=0)
-            await interaction.followup.send("Manager role cleared.", ephemeral=True)
+            await interaction.followup.send(f"Cleared {removed} manager role(s).", ephemeral=True)
+        except Exception as exc:
+            await self.send_error(interaction, exc)
+
+    @config_group.command(name="manager_roles", description="List configured manager roles")
+    async def config_manager_roles(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer(ephemeral=True)
+            if not interaction.guild:
+                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
+                return
+            roles = [interaction.guild.get_role(role_id) for role_id in self.db.get_manager_roles(interaction.guild.id)]
+            role_mentions = [role.mention for role in roles if role]
+            await interaction.followup.send(
+                f"Manager roles: {', '.join(role_mentions) if role_mentions else 'None'}",
+                ephemeral=True,
+            )
         except Exception as exc:
             await self.send_error(interaction, exc)
 
@@ -49,7 +78,8 @@ class ConfigCog(commands.Cog):
             return
 
         settings = self.db.get_guild_settings(interaction.guild.id)
-        manager_role = interaction.guild.get_role(settings["manager_role_id"]) if settings["manager_role_id"] else None
+        manager_roles = [interaction.guild.get_role(role_id) for role_id in self.db.get_manager_roles(interaction.guild.id)]
+        manager_role_mentions = [role.mention for role in manager_roles if role]
         reminder_channel = (
             interaction.guild.get_channel(settings["reminder_channel_id"])
             if settings["reminder_channel_id"]
@@ -57,7 +87,7 @@ class ConfigCog(commands.Cog):
         )
 
         response = "**Bot Config**\n"
-        response += f"**Manager Role:** {manager_role.mention if manager_role else 'Not set'}\n"
+        response += f"**Manager Roles:** {', '.join(manager_role_mentions) if manager_role_mentions else 'Not set'}\n"
         response += f"**Default Timezone:** {settings['timezone']}\n"
         response += f"**MRC Reminder Channel:** {reminder_channel.mention if reminder_channel else 'Auto'}"
         await interaction.followup.send(response, ephemeral=True)

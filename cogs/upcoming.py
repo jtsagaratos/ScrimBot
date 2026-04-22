@@ -42,10 +42,9 @@ class UpcomingCog(commands.Cog):
             embed.add_field(name=f"MRC Match #{match['id']}", value=value, inline=False)
 
         for scrim in scrims[:12]:
-            role = guild.get_role(scrim["role_id"]) if scrim["role_id"] else None
             event = guild.get_scheduled_event(int(scrim["discord_event_id"])) if scrim["discord_event_id"] else None
             value = f"{discord_time_display(scrim['datetime'], scrim['timezone'])}\n"
-            value += f"Against: {role.mention if role else scrim['team_name']}"
+            value += f"Against: {scrim['team_name']}"
             if event:
                 value += f"\nEvent: {event.url}"
             embed.add_field(name=f"Scrim #{scrim['id']}", value=value, inline=False)

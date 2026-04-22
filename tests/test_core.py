@@ -52,10 +52,19 @@ class DatabaseTests(TempDatabaseTestCase):
         all_with_archived = self.db.get_all_mrc_matches(100, include_completed=True, include_archived=True)
         self.assertEqual({match["id"] for match in all_with_archived}, {scheduled_id, completed_id})
 
-    def test_guild_settings_store_manager_role(self):
-        self.db.update_guild_settings(200, manager_role_id=12345)
-        settings = self.db.get_guild_settings(200)
-        self.assertEqual(settings["manager_role_id"], 12345)
+    def test_manager_roles_can_store_multiple_roles(self):
+        self.assertTrue(self.db.add_manager_role(200, 12345))
+        self.assertTrue(self.db.add_manager_role(200, 67890))
+        self.assertFalse(self.db.add_manager_role(200, 12345))
+        self.assertEqual(set(self.db.get_manager_roles(200)), {12345, 67890})
+
+    def test_scrim_ping_roles_can_store_multiple_roles(self):
+        self.assertTrue(self.db.add_scrim_ping_role(201, 111))
+        self.assertTrue(self.db.add_scrim_ping_role(201, 222))
+        self.assertFalse(self.db.add_scrim_ping_role(201, 111))
+        self.assertEqual(set(self.db.get_scrim_ping_roles(201)), {111, 222})
+        self.assertTrue(self.db.remove_scrim_ping_role(201, 111))
+        self.assertEqual(self.db.get_scrim_ping_roles(201), [222])
 
 
 class IgniteParserTests(unittest.TestCase):
@@ -88,7 +97,7 @@ class TimeTests(unittest.TestCase):
 
 class PermissionTests(TempDatabaseTestCase):
     def test_configured_manager_role_is_allowed(self):
-        self.db.update_guild_settings(300, manager_role_id=999)
+        self.db.add_manager_role(300, 999)
         interaction = SimpleNamespace(
             guild=SimpleNamespace(id=300),
             user=SimpleNamespace(

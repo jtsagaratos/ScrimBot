@@ -12,17 +12,16 @@ def is_manager(interaction: discord.Interaction, db: DatabaseManager) -> bool:
     if permissions.administrator or permissions.manage_guild or permissions.manage_events:
         return True
 
-    settings = db.get_guild_settings(interaction.guild.id)
-    manager_role_id = settings.get("manager_role_id")
-    if not manager_role_id:
+    manager_role_ids = set(db.get_manager_roles(interaction.guild.id))
+    if not manager_role_ids:
         return False
 
-    return any(role.id == manager_role_id for role in getattr(interaction.user, "roles", []))
+    return any(role.id in manager_role_ids for role in getattr(interaction.user, "roles", []))
 
 
 def ensure_manager(interaction: discord.Interaction, db: DatabaseManager):
     if is_manager(interaction, db):
         return
     raise PermissionError(
-        "You need Administrator, Manage Server, Manage Events, or the configured manager role to use this command."
+        "You need Administrator, Manage Server, Manage Events, or a configured manager role to use this command."
     )

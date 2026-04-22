@@ -4,14 +4,14 @@ ScrimBot is a Discord bot for scrims, MRC match scheduling, Ignite result tracki
 
 ## What The Bot Does
 
-- Create scrim events against team roles.
+- Create scrim events against plain-text opponent names.
 - Add, import, edit, view, archive, and delete MRC matches.
 - Send 30-minute MRC reminders to a configured channel.
 - Ping configured reminder roles.
 - Show upcoming MRC matches and scrims.
 - Track Ignite results from Liquipedia and auto-post new results.
 - Keep settings independent per Discord server.
-- Let a configured manager role operate the bot without full admin permissions.
+- Let configured manager roles operate the bot without full admin permissions.
 
 ## Install And Run
 
@@ -91,12 +91,13 @@ Synced X command(s)
 
 Run these commands in the Discord server where you want to use the bot.
 
-### 1. Set A Manager Role
+### 1. Set Manager Roles
 
 This lets staff manage the bot without needing full Discord admin permissions.
 
 ```text
 /config manager_role role:@Tournament Staff
+/config manager_role role:@MRC Admin
 ```
 
 Check shared config:
@@ -132,6 +133,14 @@ List reminder roles:
 
 ```text
 /mrc reminder_role_list
+```
+
+Scrim pings are configured separately:
+
+```text
+/scrim ping_role_add role:@Players
+/scrim ping_role_add role:@Scrim Team
+/scrim ping_role_list
 ```
 
 ### 5. Set Up Ignite Results
@@ -171,19 +180,27 @@ This checks the database, background tasks, Ignite source reachability, and Disc
 
 ### Schedule One Scrim
 
-The team name must match a Discord role in the server.
+The team name is plain text. The opponent does not need a Discord role.
 
 ```text
-/scrim team_name:"Team1" event_datetime:"4/22/26 4pm EST"
+/scrim create team_name:"Team1" event_datetime:"4/22/26 4pm EST"
 ```
 
 With a timezone override:
 
 ```text
-/scrim team_name:"Team1" event_datetime:"April 22 4:00 PM" timezone_name:"America/Denver"
+/scrim create team_name:"Team1" event_datetime:"April 22 4:00 PM" timezone_name:"America/Denver"
 ```
 
 The bot creates a Discord Scheduled Event and stores the scrim for `/upcoming`.
+
+Set roles to ping when scrims are created:
+
+```text
+/scrim ping_role_add role:@Players
+/scrim ping_role_add role:@Scrim Team
+/scrim ping_role_list
+```
 
 ### Add One MRC Match
 
@@ -360,8 +377,10 @@ In Discord, the `<t:...>` parts render as real local times.
 
 | Command | What It Does |
 | --- | --- |
-| `/config manager_role role:@Role` | Sets the role allowed to manage bot commands. |
-| `/config clear_manager_role` | Clears the configured manager role. |
+| `/config manager_role role:@Role` | Adds a role allowed to manage bot commands. |
+| `/config remove_manager_role role:@Role` | Removes one configured manager role. |
+| `/config clear_manager_role` | Clears all configured manager roles. |
+| `/config manager_roles` | Lists configured manager roles. |
 | `/config status` | Shows shared config for the server. |
 | `/health` | Checks database, task, Ignite, and latency health. |
 
@@ -369,7 +388,10 @@ In Discord, the `<t:...>` parts render as real local times.
 
 | Command | What It Does |
 | --- | --- |
-| `/scrim team_name event_datetime` | Creates a scrim Scheduled Event against a team role. |
+| `/scrim create team_name event_datetime` | Creates a scrim Scheduled Event against a plain-text opponent. |
+| `/scrim ping_role_add role:@Role` | Adds a role to ping when scrims are created. |
+| `/scrim ping_role_remove role:@Role` | Removes a scrim ping role. |
+| `/scrim ping_role_list` | Lists scrim ping roles. |
 | `/upcoming days:14` | Shows upcoming MRC matches and scrims together. |
 
 ### MRC Scheduling
@@ -418,7 +440,7 @@ Users can manage schedule/config commands if they have any of:
 - Administrator
 - Manage Server
 - Manage Events
-- the configured manager role from `/config manager_role`
+- any configured manager role from `/config manager_role`
 
 The bot itself needs:
 
@@ -436,7 +458,7 @@ All main data is separated by Discord server:
 - scrims
 - reminder channels
 - reminder roles
-- manager role
+- manager roles
 - default timezone
 - Ignite channel
 - Ignite source URL
@@ -475,9 +497,13 @@ Required:
 - `Rounds X-X`
 - `Upper` or `Lower`
 
-### Team Role Not Found
+### Scrim Pings Do Not Happen
 
-`/scrim` looks for a Discord role matching the team name. Create the role or use a name that partially matches an existing role.
+Add at least one scrim ping role:
+
+```text
+/scrim ping_role_add role:@Players
+```
 
 ### Ignite Does Not Post
 

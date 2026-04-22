@@ -1,8 +1,9 @@
+from typing import Optional
+
 import discord
 from dateutil import parser as date_parser
 from discord import app_commands
 from discord.ext import commands
-from typing import Optional
 
 from models.database import DatabaseManager
 from models.permissions import ensure_manager
@@ -37,19 +38,13 @@ class ScrimCog(commands.Cog):
         except Exception as e:
             raise ValueError(f"Could not parse datetime string: {datetime_str}. Error: {str(e)}")
 
-    def get_team_role(self, guild: discord.Guild, team_name: str) -> discord.Role:
-        """
-        Find a role matching the team name.
-        Searches for role names containing the team name, case-insensitively.
-        """
-        team_name_lower = team_name.lower()
-
-        for role in guild.roles:
-            if team_name_lower in role.name.lower() or role.name.lower() == team_name_lower:
-                return role
-
-        available_roles = ", ".join([r.name for r in guild.roles if not r.is_bot_managed()])
-        raise ValueError(f"Team role '{team_name}' not found. Available roles: {available_roles}")
+    def get_scrim_ping_mentions(self, guild: discord.Guild) -> str:
+        mentions = []
+        for role_id in self.db.get_scrim_ping_roles(guild.id):
+            role = guild.get_role(role_id)
+            if role:
+                mentions.append(role.mention)
+        return " ".join(mentions)
 
     async def timezone_autocomplete(self, interaction: discord.Interaction, current: str):
         current_lower = current.lower()
@@ -63,20 +58,22 @@ class ScrimCog(commands.Cog):
                 pass
         return [app_commands.Choice(name=tz, value=tz) for tz in matches[:25]]
 
-    @app_commands.command(name="scrim", description="Create a scrim event against another team")
+    scrim_group = app_commands.Group(name="scrim", description="Scrim scheduling and settings")
+
+    @scrim_group.command(name="create", description="Create a scrim event against another team")
     @app_commands.describe(
         team_name="Name of the opposing team",
         event_datetime="Date and time of the scrim (e.g., 4/22/26 4pm EST)",
         timezone_name="Timezone abbreviation or IANA name",
     )
-    async def scrim(
+    async def scrim_create(
         self,
         interaction: discord.Interaction,
         team_name: str,
         event_datetime: str,
         timezone_name: Optional[str] = None,
     ):
-        """Create a scrim event and tag the team role."""
+        """Create a scrim event and ping configured scrim roles."""
         try:
             self.ensure_manager(interaction)
             await interaction.response.defer()
@@ -86,38 +83,48 @@ class ScrimCog(commands.Cog):
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
                 return
 
+            opponent_name = team_name.strip()
+            if not opponent_name:
+                raise ValueError("Team name cannot be empty.")
+
             default_timezone = self.db.get_guild_settings(guild.id)["timezone"]
             timezone_name = normalize_timezone(timezone_name, default_timezone)
             event_dt, used_timezone = self.parse_datetime_string(event_datetime, timezone_name)
-            team_role = self.get_team_role(guild, team_name)
-            event_name = f"Scrim vs {team_role.name}"
+            event_name = f"Scrim vs {opponent_name}"
 
             scheduled_event = await guild.create_scheduled_event(
                 name=event_name,
-                description=f"Team scrim against {team_role.mention}",
+                description=f"Team scrim against {opponent_name}",
                 start_time=event_dt,
                 end_time=None,
                 location="Online",
                 privacy_level=discord.PrivacyLevel.guild_only,
-                entity_type=discord.ScheduledEventEntityType.external,
+                entity_type=discord.EntityType.external,
             )
 
             self.db.add_scrim(
                 guild.id,
-                team_role.name,
-                team_role.id,
+                opponent_name,
+                None,
                 to_utc_iso(event_dt),
                 used_timezone,
                 str(scheduled_event.id),
             )
 
-            confirmation = "Scrim event created!\n"
+            pings = self.get_scrim_ping_mentions(guild)
+            confirmation = ""
+            if pings:
+                confirmation += f"{pings}\n"
+            confirmation += "Scrim event created!\n"
             confirmation += f"**Event:** {event_name}\n"
             confirmation += f"**Time:** {discord_time_display(to_utc_iso(event_dt), used_timezone)}\n"
-            confirmation += f"**Against:** {team_role.mention}\n"
+            confirmation += f"**Against:** {opponent_name}\n"
             confirmation += f"**Event Link:** {scheduled_event.url}"
 
-            await interaction.followup.send(confirmation)
+            await interaction.followup.send(
+                confirmation,
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
         except ValueError as e:
             await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
         except PermissionError as e:
@@ -137,9 +144,58 @@ class ScrimCog(commands.Cog):
             else:
                 await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
 
-    @scrim.autocomplete("timezone_name")
+    @scrim_create.autocomplete("timezone_name")
     async def scrim_timezone_autocomplete(self, interaction: discord.Interaction, current: str):
         return await self.timezone_autocomplete(interaction, current)
+
+    @scrim_group.command(name="ping_role_add", description="Add a role to ping when scrims are created")
+    async def scrim_ping_role_add(self, interaction: discord.Interaction, role: discord.Role):
+        try:
+            self.ensure_manager(interaction)
+            await interaction.response.defer(ephemeral=True)
+            if not interaction.guild:
+                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
+                return
+            self.db.add_scrim_ping_role(interaction.guild.id, role.id)
+            await interaction.followup.send(f"Added {role.mention} to scrim pings.", ephemeral=True)
+        except Exception as e:
+            if interaction.response.is_done():
+                await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
+
+    @scrim_group.command(name="ping_role_remove", description="Remove a role from scrim pings")
+    async def scrim_ping_role_remove(self, interaction: discord.Interaction, role: discord.Role):
+        try:
+            self.ensure_manager(interaction)
+            await interaction.response.defer(ephemeral=True)
+            if not interaction.guild:
+                await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
+                return
+            removed = self.db.remove_scrim_ping_role(interaction.guild.id, role.id)
+            if removed:
+                await interaction.followup.send(f"Removed {role.mention} from scrim pings.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"{role.mention} was not configured for scrim pings.", ephemeral=True)
+        except Exception as e:
+            if interaction.response.is_done():
+                await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
+
+    @scrim_group.command(name="ping_role_list", description="List roles pinged when scrims are created")
+    async def scrim_ping_role_list(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not interaction.guild:
+            await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
+            return
+
+        roles = [interaction.guild.get_role(role_id) for role_id in self.db.get_scrim_ping_roles(interaction.guild.id)]
+        role_mentions = [role.mention for role in roles if role]
+        await interaction.followup.send(
+            f"Scrim ping roles: {', '.join(role_mentions) if role_mentions else 'None'}",
+            ephemeral=True,
+        )
 
 
 async def setup(bot):

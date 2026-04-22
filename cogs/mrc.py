@@ -329,7 +329,7 @@ class MRCCog(commands.Cog):
                 description="Vengeful MRC Match",
                 start_time=match_datetime,
                 privacy_level=discord.PrivacyLevel.guild_only,
-                entity_type=discord.ScheduledEventEntityType.external,
+                entity_type=discord.EntityType.external,
                 location="Online",
             )
             return str(event.id)

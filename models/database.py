@@ -71,6 +71,24 @@ class DatabaseManager:
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS manager_roles (
+                guild_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, role_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scrim_ping_roles (
+                guild_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, role_id)
+            )
+        ''')
+
         self._ensure_column(cursor, "mrc_matches", "discord_event_id", "TEXT")
         self._ensure_column(cursor, "mrc_matches", "reminder_sent_30", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(cursor, "mrc_matches", "timezone", "TEXT NOT NULL DEFAULT 'US/Eastern'")
@@ -230,6 +248,113 @@ class DatabaseManager:
             cursor.execute('''
                 SELECT role_id
                 FROM reminder_roles
+                WHERE guild_id = ?
+                ORDER BY role_id ASC
+            ''', (guild_id,))
+            return [row[0] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def add_manager_role(self, guild_id: int, role_id: int) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO manager_roles (guild_id, role_id, created_at)
+                VALUES (?, ?, ?)
+            ''', (guild_id, role_id, self._utc_now_iso()))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def remove_manager_role(self, guild_id: int, role_id: int) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                DELETE FROM manager_roles
+                WHERE guild_id = ? AND role_id = ?
+            ''', (guild_id, role_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def clear_manager_roles(self, guild_id: int) -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                DELETE FROM manager_roles
+                WHERE guild_id = ?
+            ''', (guild_id,))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def get_manager_roles(self, guild_id: int) -> List[int]:
+        settings = self.get_guild_settings(guild_id)
+        legacy_role_id = settings.get("manager_role_id") or None
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT role_id
+                FROM manager_roles
+                WHERE guild_id = ?
+                ORDER BY role_id ASC
+            ''', (guild_id,))
+            role_ids = [row[0] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+        if legacy_role_id and legacy_role_id not in role_ids:
+            role_ids.append(legacy_role_id)
+        return role_ids
+
+    def add_scrim_ping_role(self, guild_id: int, role_id: int) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO scrim_ping_roles (guild_id, role_id, created_at)
+                VALUES (?, ?, ?)
+            ''', (guild_id, role_id, self._utc_now_iso()))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def remove_scrim_ping_role(self, guild_id: int, role_id: int) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                DELETE FROM scrim_ping_roles
+                WHERE guild_id = ? AND role_id = ?
+            ''', (guild_id, role_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_scrim_ping_roles(self, guild_id: int) -> List[int]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT role_id
+                FROM scrim_ping_roles
                 WHERE guild_id = ?
                 ORDER BY role_id ASC
             ''', (guild_id,))
