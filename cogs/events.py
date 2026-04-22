@@ -4,6 +4,7 @@ from discord.ext import commands
 
 from cogs.mrc import MRCEditModal
 from cogs.scrim import ScrimEditModal
+from cogs.tournaments import TournamentEditModal
 from models.database import DatabaseManager
 from models.permissions import ensure_manager
 
@@ -16,11 +17,11 @@ class EventCog(commands.Cog):
     def parse_event_id(self, event_id: str):
         value = event_id.strip().upper()
         if len(value) < 2:
-            raise ValueError("Use a prefixed Event ID like M1 or S1.")
+            raise ValueError("Use a prefixed Event ID like M1, S1, or T1.")
         prefix = value[0]
         number = value[1:]
-        if prefix not in {"M", "S"} or not number.isdigit():
-            raise ValueError("Use a prefixed Event ID like M1 for MRC or S1 for scrims.")
+        if prefix not in {"M", "S", "T"} or not number.isdigit():
+            raise ValueError("Use a prefixed Event ID like M1 for MRC, S1 for scrims, or T1 for tournaments.")
         return prefix, int(number)
 
     async def event_id_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -47,10 +48,18 @@ class EventCog(commands.Cog):
             if len(choices) == 25:
                 return choices
 
+        for tournament in self.db.get_all_tournaments(interaction.guild.id, include_archived=False):
+            public_id = f"T{tournament['id']}"
+            label = f"{public_id} Tournament {tournament['tournament_name']} {tournament['status']}"
+            if not current or current_lower in public_id.lower() or current_lower in label.lower():
+                choices.append(app_commands.Choice(name=label[:100], value=public_id))
+            if len(choices) == 25:
+                return choices
+
         return choices
 
-    @app_commands.command(name="edit", description="Edit an MRC or scrim event by prefixed Event ID")
-    @app_commands.describe(event_id="Event ID, such as M1 for MRC or S1 for scrims")
+    @app_commands.command(name="edit", description="Edit an MRC, scrim, or tournament event by prefixed Event ID")
+    @app_commands.describe(event_id="Event ID, such as M1, S1, or T1")
     async def edit_event(self, interaction: discord.Interaction, event_id: str):
         try:
             ensure_manager(interaction, self.db)
@@ -70,6 +79,18 @@ class EventCog(commands.Cog):
                     await interaction.response.send_message(f"Event ID M{database_id} not found.", ephemeral=True)
                     return
                 await interaction.response.send_modal(MRCEditModal(mrc_cog, guild.id, match))
+                return
+
+            if prefix == "T":
+                tournament_cog = self.bot.get_cog("TournamentCog")
+                if not tournament_cog:
+                    await interaction.response.send_message("Error: Tournament commands are not loaded.", ephemeral=True)
+                    return
+                tournament = self.db.get_tournament(guild.id, database_id)
+                if not tournament:
+                    await interaction.response.send_message(f"Event ID T{database_id} not found.", ephemeral=True)
+                    return
+                await interaction.response.send_modal(TournamentEditModal(tournament_cog, guild.id, tournament))
                 return
 
             scrim_cog = self.bot.get_cog("ScrimCog")

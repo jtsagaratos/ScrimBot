@@ -106,7 +106,7 @@ From there you can configure:
 - Shared reminder channel for MRC and scrims
 - MRC event posting channel
 - MRC reminder ping roles
-- Scrim event posting channel
+- Scrim/tournament event posting channel
 - Scrim ping roles
 - Ignite result channel
 - Ignite source URL
@@ -133,7 +133,7 @@ Use `/setup`, choose **Channels**, then choose the reminder channel. Both MRC an
 
 ### 4. Set Event Posting Channels
 
-Use `/setup`, choose **Channels**, then choose the MRC event channel and scrim event channel. New events are posted in their respective channels when staff create them.
+Use `/setup`, choose **Channels**, then choose the MRC event channel, scrim event channel, and tournament event channel. New events are posted in their respective channels when staff create them.
 
 ### 5. Add Reminder Ping Roles
 
@@ -210,6 +210,29 @@ Set roles to ping for scrim reminders:
 ```
 
 Choose **Roles**, then check the scrim ping roles.
+
+### Schedule One Tournament
+
+Tournament names are plain text and use `T` event IDs.
+
+```text
+/tournament create name:"Ignite Qualifier" date_time:"4/24/26 6pm EST" duration_hrs:3
+```
+
+Edit a tournament later:
+
+```text
+/edit event_id:T1
+```
+
+Manage tournaments:
+
+```text
+/tournament view
+/tournament upcoming days:14
+/tournament status event_id:T1 status:"Completed"
+/tournament delete event_id:T1
+```
 
 ### Add One MRC Event
 
@@ -399,7 +422,7 @@ In Discord, the `<t:...>` parts render as real local times.
 
 ### Setup
 
-Use `/setup` first. It opens an interactive setup panel for timezone, manager roles, the shared reminder channel, MRC event channel, scrim event channel, MRC reminder roles, scrim ping roles, and Ignite posting settings.
+Use `/setup` first. It opens an interactive setup panel for timezone, manager roles, the shared reminder channel, MRC event channel, scrim event channel, tournament event channel, MRC reminder roles, scrim ping roles, and Ignite posting settings.
 
 | Command | What It Does |
 | --- | --- |
@@ -422,7 +445,19 @@ Use `/setup` first. It opens an interactive setup panel for timezone, manager ro
 | `/scrim archive_completed` | Archives completed/cancelled scrim events. |
 | `/scrim repair_events` | Recreates missing Discord Scheduled Events for scrims. |
 | `/scrim delete event_id` | Deletes a scrim and its linked event. |
-| `/upcoming days:14` | Shows upcoming MRC events and scrims together. |
+| `/upcoming days:14` | Shows upcoming MRC events, scrims, and tournaments together. |
+
+### Tournaments
+
+| Command | What It Does |
+| --- | --- |
+| `/tournament create name date_time duration_hrs` | Creates a tournament Scheduled Event. |
+| `/tournament view` | Shows active tournament events with pagination. |
+| `/tournament upcoming` | Shows upcoming tournament events. |
+| `/tournament status event_id status` | Sets tournament event status. |
+| `/tournament archive_completed` | Archives completed/cancelled tournament events. |
+| `/tournament repair_events` | Recreates missing Discord Scheduled Events for tournaments. |
+| `/tournament delete event_id` | Deletes a tournament and its linked event. |
 
 ### MRC Scheduling
 
@@ -442,7 +477,7 @@ Use `/setup` first. It opens an interactive setup panel for timezone, manager ro
 
 | Command | What It Does |
 | --- | --- |
-| `/edit event_id` | Opens the correct edit form for `M#` MRC IDs or `S#` scrim IDs. |
+| `/edit event_id` | Opens the correct edit form for `M#` MRC IDs, `S#` scrim IDs, or `T#` tournament IDs. |
 
 ### Ignite
 
@@ -473,9 +508,11 @@ All main data is separated by Discord server:
 
 - MRC events
 - scrims
+- tournaments
 - shared reminder channel
 - MRC event posting channel
 - scrim event posting channel
+- tournament event posting channel
 - reminder roles
 - manager roles
 - default timezone

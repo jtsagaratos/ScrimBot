@@ -64,8 +64,26 @@ class DatabaseManager:
                 scrim_reminder_channel_id INTEGER,
                 mrc_event_channel_id INTEGER,
                 scrim_event_channel_id INTEGER,
+                tournament_event_channel_id INTEGER,
                 manager_role_id INTEGER,
                 timezone TEXT NOT NULL DEFAULT 'US/Eastern',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tournament_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                tournament_name TEXT NOT NULL,
+                datetime TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                discord_event_id TEXT,
+                reminder_sent_30 INTEGER NOT NULL DEFAULT 0,
+                duration_hours REAL NOT NULL DEFAULT 2.0,
+                status TEXT NOT NULL DEFAULT 'Scheduled',
+                archived INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -112,6 +130,7 @@ class DatabaseManager:
         self._ensure_column(cursor, "guild_settings", "scrim_reminder_channel_id", "INTEGER")
         self._ensure_column(cursor, "guild_settings", "mrc_event_channel_id", "INTEGER")
         self._ensure_column(cursor, "guild_settings", "scrim_event_channel_id", "INTEGER")
+        self._ensure_column(cursor, "guild_settings", "tournament_event_channel_id", "INTEGER")
         self._ensure_column(cursor, "guild_settings", "manager_role_id", "INTEGER")
 
         conn.commit()
@@ -170,6 +189,22 @@ class DatabaseManager:
             'updated_at': row[12],
         }
 
+    def _row_to_tournament(self, row) -> Dict:
+        return {
+            'id': row[0],
+            'guild_id': row[1],
+            'tournament_name': row[2],
+            'datetime': row[3],
+            'timezone': row[4],
+            'discord_event_id': row[5],
+            'reminder_sent_30': row[6],
+            'duration_hours': row[7],
+            'status': row[8],
+            'archived': row[9],
+            'created_at': row[10],
+            'updated_at': row[11],
+        }
+
     # ==================== SETTINGS ====================
 
     def get_guild_settings(self, guild_id: int) -> Dict:
@@ -179,7 +214,7 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 SELECT guild_id, reminder_channel_id, scrim_reminder_channel_id,
-                       mrc_event_channel_id, scrim_event_channel_id, manager_role_id,
+                       mrc_event_channel_id, scrim_event_channel_id, tournament_event_channel_id, manager_role_id,
                        timezone, created_at, updated_at
                 FROM guild_settings
                 WHERE guild_id = ?
@@ -192,10 +227,11 @@ class DatabaseManager:
                     'scrim_reminder_channel_id': row[2],
                     'mrc_event_channel_id': row[3],
                     'scrim_event_channel_id': row[4],
-                    'manager_role_id': row[5],
-                    'timezone': row[6],
-                    'created_at': row[7],
-                    'updated_at': row[8],
+                    'tournament_event_channel_id': row[5],
+                    'manager_role_id': row[6],
+                    'timezone': row[7],
+                    'created_at': row[8],
+                    'updated_at': row[9],
                 }
 
             now = self._utc_now_iso()
@@ -210,6 +246,7 @@ class DatabaseManager:
                 'scrim_reminder_channel_id': None,
                 'mrc_event_channel_id': None,
                 'scrim_event_channel_id': None,
+                'tournament_event_channel_id': None,
                 'manager_role_id': None,
                 'timezone': "US/Eastern",
                 'created_at': now,
@@ -224,6 +261,7 @@ class DatabaseManager:
             'scrim_reminder_channel_id',
             'mrc_event_channel_id',
             'scrim_event_channel_id',
+            'tournament_event_channel_id',
             'manager_role_id',
             'timezone',
         }
@@ -803,3 +841,187 @@ class DatabaseManager:
 
     def mark_scrim_30_minute_reminder_sent(self, guild_id: int, scrim_id: int) -> bool:
         return self.update_scrim(guild_id, scrim_id, reminder_sent_30=1)
+
+    # ==================== TOURNAMENT OPERATIONS ====================
+
+    def add_tournament(self, guild_id: int, tournament_name: str, datetime_str: str,
+                       timezone_name: str, discord_event_id: Optional[str],
+                       duration_hours: float = 2.0,
+                       status: str = "Scheduled") -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        now = self._utc_now_iso()
+
+        try:
+            cursor.execute('''
+                INSERT INTO tournament_events
+                (guild_id, tournament_name, datetime, timezone, discord_event_id,
+                 reminder_sent_30, duration_hours, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            ''', (guild_id, tournament_name, datetime_str, timezone_name, discord_event_id,
+                  duration_hours, status, now, now))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def get_all_tournaments(
+        self,
+        guild_id: int,
+        include_completed: bool = True,
+        include_archived: bool = False,
+    ) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            where_clauses = ["guild_id = ?"]
+            values = [guild_id]
+            if not include_archived:
+                where_clauses.append("archived = 0")
+            if not include_completed:
+                where_clauses.append("status NOT IN ('Completed', 'Cancelled')")
+
+            cursor.execute('''
+                SELECT id, guild_id, tournament_name, datetime, timezone, discord_event_id,
+                       reminder_sent_30, duration_hours, status, archived, created_at, updated_at
+                FROM tournament_events
+                WHERE ''' + " AND ".join(where_clauses) + '''
+                ORDER BY datetime ASC
+            ''', values)
+            return [self._row_to_tournament(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_tournament(self, guild_id: int, tournament_id: int) -> Optional[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, tournament_name, datetime, timezone, discord_event_id,
+                       reminder_sent_30, duration_hours, status, archived, created_at, updated_at
+                FROM tournament_events
+                WHERE id = ? AND guild_id = ?
+            ''', (tournament_id, guild_id))
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_tournament(row)
+            return None
+        finally:
+            conn.close()
+
+    def get_upcoming_tournaments(
+        self,
+        guild_id: int,
+        days: int = 14,
+        include_completed: bool = False,
+        include_archived: bool = False,
+    ) -> List[Dict]:
+        now = datetime.now(timezone.utc)
+        cutoff = now + timedelta(days=days)
+        tournaments = []
+        for tournament in self.get_all_tournaments(
+            guild_id,
+            include_completed=include_completed,
+            include_archived=include_archived,
+        ):
+            dt = self._parse_stored_datetime(tournament['datetime'])
+            if now <= dt <= cutoff:
+                tournaments.append(tournament)
+        return tournaments
+
+    def update_tournament(self, guild_id: int, tournament_id: int, **kwargs) -> bool:
+        allowed_fields = {
+            'tournament_name',
+            'datetime',
+            'timezone',
+            'discord_event_id',
+            'reminder_sent_30',
+            'duration_hours',
+            'status',
+            'archived',
+        }
+        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
+        if not update_fields:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            set_clause = ', '.join([f"{field} = ?" for field in update_fields.keys()])
+            update_fields['updated_at'] = self._utc_now_iso()
+            set_clause += ", updated_at = ?"
+            values = list(update_fields.values()) + [tournament_id, guild_id]
+
+            cursor.execute(f'''
+                UPDATE tournament_events
+                SET {set_clause}
+                WHERE id = ? AND guild_id = ?
+            ''', values)
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def delete_tournament(self, guild_id: int, tournament_id: int) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                DELETE FROM tournament_events
+                WHERE id = ? AND guild_id = ?
+            ''', (tournament_id, guild_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def archive_completed_tournaments(self, guild_id: int) -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE tournament_events
+                SET archived = 1, updated_at = ?
+                WHERE guild_id = ?
+                  AND archived = 0
+                  AND status IN ('Completed', 'Cancelled')
+            ''', (self._utc_now_iso(), guild_id))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def get_tournaments_needing_30_minute_reminder(self) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, tournament_name, datetime, timezone, discord_event_id,
+                       reminder_sent_30, duration_hours, status, archived, created_at, updated_at
+                FROM tournament_events
+                WHERE reminder_sent_30 = 0
+                  AND archived = 0
+                ORDER BY datetime ASC
+            ''')
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        now = datetime.now(timezone.utc)
+        cutoff = now + timedelta(minutes=30)
+        tournaments = []
+        for row in rows:
+            tournament = self._row_to_tournament(row)
+            dt = self._parse_stored_datetime(tournament['datetime'])
+            if now < dt <= cutoff:
+                tournaments.append(tournament)
+        return tournaments
+
+    def mark_tournament_30_minute_reminder_sent(self, guild_id: int, tournament_id: int) -> bool:
+        return self.update_tournament(guild_id, tournament_id, reminder_sent_30=1)

@@ -35,7 +35,14 @@ class HealthCog(commands.Cog):
         if scrim and getattr(scrim, "scrim_reminder_task", None):
             checks.append(f"Scrim reminder task: {'running' if scrim.scrim_reminder_task.is_running() else 'stopped'}")
         else:
-            checks.append("MRC reminder task: not loaded")
+            checks.append("Scrim reminder task: not loaded")
+        tournament = self.bot.get_cog("TournamentCog")
+        if tournament and getattr(tournament, "tournament_reminder_task", None):
+            checks.append(
+                f"Tournament reminder task: {'running' if tournament.tournament_reminder_task.is_running() else 'stopped'}"
+            )
+        else:
+            checks.append("Tournament reminder task: not loaded")
 
         ignite = self.bot.get_cog("IgniteCog")
         if ignite and getattr(ignite, "check_ignite_results", None):

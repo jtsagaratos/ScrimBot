@@ -154,6 +154,39 @@ class DatabaseTests(TempDatabaseTestCase):
         with_archived = self.db.get_all_scrims(204, include_completed=True, include_archived=True)
         self.assertEqual({scrim["id"] for scrim in with_archived}, {scheduled_id, completed_id})
 
+    def test_tournament_crud_and_archive_filters(self):
+        now = datetime.now(timezone.utc)
+        scheduled_id = self.db.add_tournament(
+            207,
+            "Ignite Qualifier",
+            to_utc_iso(now + timedelta(days=1)),
+            "UTC",
+            "111",
+        )
+        completed_id = self.db.add_tournament(
+            207,
+            "Finals",
+            to_utc_iso(now + timedelta(days=2)),
+            "UTC",
+            "222",
+            status="Completed",
+        )
+
+        visible = self.db.get_all_tournaments(207, include_completed=False)
+        self.assertEqual([event["id"] for event in visible], [scheduled_id])
+
+        upcoming = self.db.get_upcoming_tournaments(207, days=7)
+        self.assertEqual([event["id"] for event in upcoming], [scheduled_id])
+
+        archived_count = self.db.archive_completed_tournaments(207)
+        self.assertEqual(archived_count, 1)
+
+        unarchived = self.db.get_all_tournaments(207, include_completed=True)
+        self.assertEqual([event["id"] for event in unarchived], [scheduled_id])
+
+        with_archived = self.db.get_all_tournaments(207, include_completed=True, include_archived=True)
+        self.assertEqual({event["id"] for event in with_archived}, {scheduled_id, completed_id})
+
     def test_scrim_reminder_settings_and_due_queries(self):
         now = datetime.now(timezone.utc)
         self.db.update_guild_settings(

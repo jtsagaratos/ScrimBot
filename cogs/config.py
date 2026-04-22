@@ -232,6 +232,25 @@ class ScrimEventChannelSelect(discord.ui.ChannelSelect):
         )
 
 
+class TournamentEventChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, cog):
+        self.cog = cog
+        super().__init__(
+            placeholder="Choose tournament event posting channel",
+            channel_types=[discord.ChannelType.text],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = self.values[0]
+        self.cog.db.update_guild_settings(interaction.guild.id, tournament_event_channel_id=channel.id)
+        await interaction.response.edit_message(
+            content=self.cog.build_setup_status(interaction.guild),
+            view=SetupChannelsView(self.cog),
+        )
+
+
 class IgniteChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, cog):
         self.cog = cog
@@ -332,7 +351,7 @@ class SetupChannelsView(discord.ui.View):
         self.add_item(ReminderChannelSelect(cog))
         self.add_item(MRCEventChannelSelect(cog))
         self.add_item(ScrimEventChannelSelect(cog))
-        self.add_item(IgniteChannelSelect(cog))
+        self.add_item(TournamentEventChannelSelect(cog))
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -345,6 +364,7 @@ class SetupIgniteView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=600)
         self.cog = cog
+        self.add_item(IgniteChannelSelect(cog))
 
     @discord.ui.button(label="Source / Team", style=discord.ButtonStyle.primary)
     async def ignite_options_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -430,6 +450,11 @@ class ConfigCog(commands.Cog):
         reminder_channel = guild.get_channel(reminder_channel_id) if reminder_channel_id else None
         mrc_event_channel = guild.get_channel(settings["mrc_event_channel_id"]) if settings["mrc_event_channel_id"] else None
         scrim_event_channel = guild.get_channel(settings["scrim_event_channel_id"]) if settings["scrim_event_channel_id"] else None
+        tournament_event_channel = (
+            guild.get_channel(settings["tournament_event_channel_id"])
+            if settings["tournament_event_channel_id"]
+            else None
+        )
         ignite_cog = self.get_ignite_cog()
         ignite_settings = ignite_cog.get_settings(guild.id)
         ignite_channel = self.bot.get_channel(int(ignite_settings["channel_id"])) if ignite_settings["channel_id"] else None
@@ -441,6 +466,7 @@ class ConfigCog(commands.Cog):
         response += f"**Reminder Channel:** {reminder_channel.mention if reminder_channel else 'Auto'}\n"
         response += f"**MRC Event Channel:** {mrc_event_channel.mention if mrc_event_channel else 'Command channel'}\n"
         response += f"**Scrim Event Channel:** {scrim_event_channel.mention if scrim_event_channel else 'Command channel'}\n"
+        response += f"**Tournament Event Channel:** {tournament_event_channel.mention if tournament_event_channel else 'Command channel'}\n"
         response += f"**MRC Reminder Roles:** {self.format_roles(guild, self.db.get_reminder_roles(guild.id))}\n"
         response += f"**Scrim Ping Roles:** {self.format_roles(guild, self.db.get_scrim_ping_roles(guild.id))}\n"
         response += f"**Ignite Channel:** {ignite_channel.mention if ignite_channel else 'Not set'}\n"
