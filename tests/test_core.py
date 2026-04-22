@@ -66,6 +66,79 @@ class DatabaseTests(TempDatabaseTestCase):
         self.assertTrue(self.db.remove_scrim_ping_role(201, 111))
         self.assertEqual(self.db.get_scrim_ping_roles(201), [222])
 
+    def test_event_duration_is_stored_for_matches_and_scrims(self):
+        dt = to_utc_iso(datetime.now(timezone.utc) + timedelta(days=1))
+        match_id = self.db.add_mrc_match(
+            202,
+            dt,
+            "Rounds 1-3",
+            "Upper",
+            duration_hours=1.5,
+        )
+        scrim_id = self.db.add_scrim(
+            202,
+            "Other Team",
+            None,
+            dt,
+            "UTC",
+            "123",
+            duration_hours=3,
+        )
+
+        match = self.db.get_mrc_match(202, match_id)
+        scrim = self.db.get_upcoming_scrims(202, days=7)[0]
+        self.assertEqual(match["duration_hours"], 1.5)
+        self.assertEqual(scrim["id"], scrim_id)
+        self.assertEqual(scrim["duration_hours"], 3)
+
+    def test_scrim_can_be_updated_by_event_id(self):
+        dt = to_utc_iso(datetime.now(timezone.utc) + timedelta(days=1))
+        scrim_id = self.db.add_scrim(203, "Old Team", None, dt, "UTC", "999", duration_hours=2)
+
+        updated = self.db.update_scrim(
+            203,
+            scrim_id,
+            team_name="New Team",
+            duration_hours=1.5,
+        )
+
+        scrim = self.db.get_scrim(203, scrim_id)
+        self.assertTrue(updated)
+        self.assertEqual(scrim["team_name"], "New Team")
+        self.assertEqual(scrim["duration_hours"], 1.5)
+
+    def test_scrim_status_and_archive_filters(self):
+        now = datetime.now(timezone.utc)
+        scheduled_id = self.db.add_scrim(
+            204,
+            "Scheduled Team",
+            None,
+            to_utc_iso(now + timedelta(days=1)),
+            "UTC",
+            "111",
+        )
+        completed_id = self.db.add_scrim(
+            204,
+            "Completed Team",
+            None,
+            to_utc_iso(now + timedelta(days=2)),
+            "UTC",
+            "222",
+            status="Completed",
+        )
+
+        visible = self.db.get_all_scrims(204, include_completed=False)
+        self.assertEqual([scrim["id"] for scrim in visible], [scheduled_id])
+
+        archived_count = self.db.archive_completed_scrims(204)
+        self.assertEqual(archived_count, 1)
+
+        unarchived = self.db.get_all_scrims(204, include_completed=True)
+        self.assertEqual([scrim["id"] for scrim in unarchived], [scheduled_id])
+
+        with_archived = self.db.get_all_scrims(204, include_completed=True, include_archived=True)
+        self.assertEqual({scrim["id"] for scrim in with_archived}, {scheduled_id, completed_id})
+
 
 class IgniteParserTests(unittest.TestCase):
     def test_parse_ignite_results_html(self):

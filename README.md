@@ -183,16 +183,32 @@ This checks the database, background tasks, Ignite source reachability, and Disc
 The team name is plain text. The opponent does not need a Discord role.
 
 ```text
-/scrim create team_name:"Team1" event_datetime:"4/22/26 4pm EST"
+/scrim create team_name:"Team1" event_datetime:"4/22/26 4pm EST" duration_hours:2
 ```
 
 With a timezone override:
 
 ```text
-/scrim create team_name:"Team1" event_datetime:"April 22 4:00 PM" timezone_name:"America/Denver"
+/scrim create team_name:"Team1" event_datetime:"April 22 4:00 PM" duration_hours:2 timezone_name:"America/Denver"
 ```
 
-The bot creates a Discord Scheduled Event and stores the scrim for `/upcoming`.
+The bot creates a Discord Scheduled Event with the required duration and stores the scrim for `/upcoming`.
+The Discord event description includes the bot's `Event ID`, which is the number used for edit commands.
+
+Edit a scrim later:
+
+```text
+/scrim edit event_id:12
+```
+
+Manage scrims like MRC events:
+
+```text
+/scrim view
+/scrim upcoming days:14
+/scrim status event_id:12 status:"Completed"
+/scrim delete event_id:12
+```
 
 Set roles to ping when scrims are created:
 
@@ -202,21 +218,25 @@ Set roles to ping when scrims are created:
 /scrim ping_role_list
 ```
 
-### Add One MRC Match
+### Add One MRC Event
 
 ```text
-/mrc add datetime_str:"April 25 1:00 PM" rounds:"1-3" bracket:"Upper"
+/mrc add datetime_str:"April 25 1:00 PM" rounds:"1-3" bracket:"Upper" duration_hours:2
 ```
 
 With a timezone:
 
 ```text
-/mrc add datetime_str:"April 25 1:00 PM" rounds:"Rounds 1-3" bracket:"Upper" timezone_name:"America/Denver"
+/mrc add datetime_str:"April 25 1:00 PM" rounds:"Rounds 1-3" bracket:"Upper" duration_hours:2 timezone_name:"America/Denver"
 ```
 
-### Bulk Import MRC Matches
+### Bulk Import MRC Events
 
-Use `/mrc import`, then paste lines in this format:
+Use `/mrc import` with a required duration, then paste lines in this format:
+
+```text
+/mrc import schedule:"April 25 1:00 PM Rounds 1-3 Upper" duration_hours:2
+```
 
 ```text
 April 25 1:00 PM Rounds 1-3 Upper
@@ -231,10 +251,10 @@ April 25 1:00 PM Rounds 1-3 Upper America/Denver
 April 25 4:00 PM Rounds 1-3 Lower PST
 ```
 
-### Add MRC Matches Interactively
+### Add MRC Events Interactively
 
 ```text
-/mrc session
+/mrc session duration_hours:2
 ```
 
 Then send one line at a time:
@@ -283,27 +303,29 @@ MRC matches and scrims together:
 /upcoming days:14
 ```
 
-### Edit An MRC Match
+### Edit An MRC Event
 
 ```text
-/mrc edit match_id:12
+/mrc edit event_id:12
 ```
 
 Discord opens a prefilled form with:
 
 - Date/Time
 - Timezone
+- Duration Hours
 - Rounds
 - Bracket
-- Status
 
 Submit the form to update the database and the linked Discord Scheduled Event.
+Use `/mrc status` to change event status.
+The linked Discord Scheduled Event description includes the bot's `Event ID`.
 
 ### Change Match Status
 
 ```text
-/mrc status match_id:12 status:"In Progress"
-/mrc status match_id:12 status:"Completed"
+/mrc status event_id:12 status:"In Progress"
+/mrc status event_id:12 status:"Completed"
 ```
 
 Supported statuses:
@@ -336,10 +358,10 @@ Include completed/cancelled matches:
 /mrc repair_events include_completed:true
 ```
 
-### Delete An MRC Match
+### Delete An MRC Event
 
 ```text
-/mrc delete match_id:12
+/mrc delete event_id:12
 ```
 
 This deletes the database match and its linked Discord Scheduled Event.
@@ -388,7 +410,14 @@ In Discord, the `<t:...>` parts render as real local times.
 
 | Command | What It Does |
 | --- | --- |
-| `/scrim create team_name event_datetime` | Creates a scrim Scheduled Event against a plain-text opponent. |
+| `/scrim create team_name event_datetime duration_hours` | Creates a scrim Scheduled Event against a plain-text opponent. |
+| `/scrim view` | Shows active scrim events with pagination. |
+| `/scrim upcoming` | Shows upcoming scrim events. |
+| `/scrim edit event_id` | Opens a prefilled edit form for a scrim event. |
+| `/scrim status event_id status` | Sets scrim event status. |
+| `/scrim archive_completed` | Archives completed/cancelled scrim events. |
+| `/scrim repair_events` | Recreates missing Discord Scheduled Events for scrims. |
+| `/scrim delete event_id` | Deletes a scrim and its linked event. |
 | `/scrim ping_role_add role:@Role` | Adds a role to ping when scrims are created. |
 | `/scrim ping_role_remove role:@Role` | Removes a scrim ping role. |
 | `/scrim ping_role_list` | Lists scrim ping roles. |
@@ -398,12 +427,12 @@ In Discord, the `<t:...>` parts render as real local times.
 
 | Command | What It Does |
 | --- | --- |
-| `/mrc add` | Adds one MRC match. |
-| `/mrc import` | Bulk imports many MRC matches from pasted text. |
-| `/mrc session` | Adds matches one by one in chat. |
+| `/mrc add` | Adds one MRC match with a required event duration. |
+| `/mrc import` | Bulk imports many MRC matches from pasted text with one required duration for all imported events. |
+| `/mrc session` | Adds matches one by one in chat with one required duration for the session. |
 | `/mrc view` | Shows active MRC matches with pagination. |
 | `/mrc upcoming` | Shows upcoming MRC matches. |
-| `/mrc edit match_id` | Opens a prefilled edit form. |
+| `/mrc edit event_id` | Opens a prefilled edit form. |
 | `/mrc status` | Sets match status. |
 | `/mrc archive_completed` | Archives completed/cancelled matches. |
 | `/mrc repair_events` | Recreates missing Discord Scheduled Events. |

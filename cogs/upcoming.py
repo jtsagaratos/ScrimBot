@@ -37,17 +37,19 @@ class UpcomingCog(commands.Cog):
         for match in matches[:12]:
             value = (
                 f"{discord_time_display(match['datetime'], match['timezone'])}\n"
-                f"{match['round_group']} | {match['bracket']} | {match['status']}"
+                f"{match['round_group']} | {match['bracket']} | {match['duration_hours']:g}h | {match['status']}"
             )
-            embed.add_field(name=f"MRC Match #{match['id']}", value=value, inline=False)
+            embed.add_field(name=f"MRC Event ID {match['id']}", value=value, inline=False)
 
         for scrim in scrims[:12]:
             event = guild.get_scheduled_event(int(scrim["discord_event_id"])) if scrim["discord_event_id"] else None
             value = f"{discord_time_display(scrim['datetime'], scrim['timezone'])}\n"
+            value += f"Duration: {scrim['duration_hours']:g}h\n"
+            value += f"Status: {scrim['status']}\n"
             value += f"Against: {scrim['team_name']}"
             if event:
                 value += f"\nEvent: {event.url}"
-            embed.add_field(name=f"Scrim #{scrim['id']}", value=value, inline=False)
+            embed.add_field(name=f"Scrim Event ID {scrim['id']}", value=value, inline=False)
 
         hidden = max(0, len(matches) - 12) + max(0, len(scrims) - 12)
         if hidden:

@@ -12,11 +12,13 @@ from models.permissions import ensure_manager
 from models.time_utils import (
     COMMON_TIMEZONES,
     discord_time_display,
+    event_end_time,
     localize_datetime,
     normalize_timezone,
     parse_stored_datetime,
     split_trailing_timezone,
     to_utc_iso,
+    validate_duration_hours,
 )
 
 
@@ -30,7 +32,7 @@ STATUS_CHOICES = [app_commands.Choice(name=status, value=status) for status in M
 
 class MRCEditModal(discord.ui.Modal):
     def __init__(self, cog, guild_id: int, match: dict):
-        super().__init__(title=f"Edit MRC Match #{match['id']}")
+        super().__init__(title=f"Edit MRC Event #{match['id']}")
         self.cog = cog
         self.guild_id = guild_id
         self.match = match
@@ -50,6 +52,12 @@ class MRCEditModal(discord.ui.Modal):
             placeholder="America/Denver, EST, PST, UTC",
             max_length=80,
         )
+        self.duration_input = discord.ui.TextInput(
+            label="Duration Hours",
+            default=f"{match.get('duration_hours', 2.0):g}",
+            placeholder="2 or 1.5",
+            max_length=10,
+        )
         self.rounds_input = discord.ui.TextInput(
             label="Rounds",
             default=match["round_group"],
@@ -62,18 +70,11 @@ class MRCEditModal(discord.ui.Modal):
             placeholder="Upper or Lower",
             max_length=20,
         )
-        self.status_input = discord.ui.TextInput(
-            label="Status",
-            default=match["status"],
-            placeholder="Scheduled, Checked In, In Progress, Completed, Cancelled",
-            max_length=40,
-        )
-
         self.add_item(self.datetime_input)
         self.add_item(self.timezone_input)
+        self.add_item(self.duration_input)
         self.add_item(self.rounds_input)
         self.add_item(self.bracket_input)
-        self.add_item(self.status_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -84,7 +85,7 @@ class MRCEditModal(discord.ui.Modal):
 
             match = self.cog.db.get_mrc_match(self.guild_id, self.match["id"])
             if not match:
-                await interaction.response.send_message(f"Match with ID {self.match['id']} not found.", ephemeral=True)
+                await interaction.response.send_message(f"Event ID {self.match['id']} not found.", ephemeral=True)
                 return
 
             timezone_name = normalize_timezone(str(self.timezone_input.value).strip(), match["timezone"])
@@ -93,7 +94,7 @@ class MRCEditModal(discord.ui.Modal):
             bracket = str(self.bracket_input.value).strip().capitalize()
             if bracket not in {"Upper", "Lower"}:
                 raise ValueError("Bracket must be 'Upper' or 'Lower'")
-            status = self.cog.normalize_status(str(self.status_input.value).strip())
+            duration_hours = validate_duration_hours(str(self.duration_input.value).strip())
 
             self.cog.db.update_mrc_match(
                 self.guild_id,
@@ -102,7 +103,7 @@ class MRCEditModal(discord.ui.Modal):
                 round_group=round_group,
                 bracket=bracket,
                 timezone=timezone_name,
-                status=status,
+                duration_hours=duration_hours,
                 reminder_sent_30=0,
             )
 
@@ -113,11 +114,13 @@ class MRCEditModal(discord.ui.Modal):
                     new_datetime,
                     round_group,
                     bracket,
+                    duration_hours,
+                    match["id"],
                 )
 
             updated = self.cog.db.get_mrc_match(self.guild_id, match["id"])
             await interaction.response.send_message(
-                f"**Match Updated**\n{self.cog.build_match_line(updated)}"
+                f"**Event Updated**\n{self.cog.build_match_line(updated)}"
             )
         except Exception as e:
             await interaction.response.send_message(f"Error: {str(e)}", ephemeral=True)
@@ -146,7 +149,7 @@ class MRCMatchPageView(discord.ui.View):
         start = self.page * self.page_size
         end = start + self.page_size
         for match in self.matches[start:end]:
-            embed.add_field(name=f"Match #{match['id']}", value=self.cog.build_match_line(match), inline=False)
+            embed.add_field(name=f"Event ID {match['id']}", value=self.cog.build_match_line(match), inline=False)
         return embed
 
     def update_buttons(self):
@@ -320,14 +323,17 @@ class MRCCog(commands.Cog):
         match_datetime: datetime,
         round_group: str,
         bracket: str,
+        duration_hours: float,
+        event_id: int,
     ) -> Optional[str]:
         """Create a Discord Scheduled Event and return its ID."""
         try:
             event_name = f"MRC S7 - {round_group} ({bracket})"
             event = await guild.create_scheduled_event(
                 name=event_name,
-                description="Vengeful MRC Match",
+                description=f"Vengeful MRC Match\nEvent ID: {event_id}",
                 start_time=match_datetime,
+                end_time=event_end_time(match_datetime, duration_hours),
                 privacy_level=discord.PrivacyLevel.guild_only,
                 entity_type=discord.EntityType.external,
                 location="Online",
@@ -345,6 +351,8 @@ class MRCCog(commands.Cog):
         match_datetime: Optional[datetime] = None,
         round_group: Optional[str] = None,
         bracket: Optional[str] = None,
+        duration_hours: Optional[float] = None,
+        event_database_id: Optional[int] = None,
     ) -> bool:
         """Update an existing Discord Scheduled Event."""
         try:
@@ -355,8 +363,12 @@ class MRCCog(commands.Cog):
             update_kwargs = {}
             if match_datetime:
                 update_kwargs["start_time"] = match_datetime
+            if match_datetime and duration_hours is not None:
+                update_kwargs["end_time"] = event_end_time(match_datetime, duration_hours)
             if round_group and bracket:
                 update_kwargs["name"] = f"MRC S7 - {round_group} ({bracket})"
+            if event_database_id is not None:
+                update_kwargs["description"] = f"Vengeful MRC Match\nEvent ID: {event_database_id}"
 
             if update_kwargs:
                 await event.edit(**update_kwargs)
@@ -379,8 +391,8 @@ class MRCCog(commands.Cog):
     def build_match_line(self, match: dict) -> str:
         archived = " | Archived" if match.get("archived") else ""
         return (
-            f"`#{match['id']}` {discord_time_display(match['datetime'], match['timezone'])}\n"
-            f"{match['round_group']} | {match['bracket']} | {match['status']}{archived}"
+            f"`Event ID {match['id']}` {discord_time_display(match['datetime'], match['timezone'])}\n"
+            f"{match['round_group']} | {match['bracket']} | {match['duration_hours']:g}h | {match['status']}{archived}"
         )
 
     # ==================== AUTOCOMPLETE ====================
@@ -403,7 +415,7 @@ class MRCCog(commands.Cog):
         matches = self.db.get_all_mrc_matches(interaction.guild.id)
         choices = []
         for match in matches:
-            label = f"#{match['id']} {match['round_group']} {match['bracket']} {match['status']}"
+            label = f"Event ID {match['id']} {match['round_group']} {match['bracket']} {match['status']}"
             if current and current not in str(match["id"]) and current.lower() not in label.lower():
                 continue
             choices.append(app_commands.Choice(name=label[:100], value=match["id"]))
@@ -511,12 +523,14 @@ class MRCCog(commands.Cog):
     @mrc_group.command(name="import", description="Bulk import MRC schedule from multiline text")
     @app_commands.describe(
         schedule="Multiline schedule text. Format: April 25 1:00 PM Rounds 1-3 Upper",
+        duration_hours="Event duration in hours, such as 2 or 1.5",
         timezone_name="Default timezone for lines without a trailing timezone",
     )
     async def mrc_import(
         self,
         interaction: discord.Interaction,
         schedule: str,
+        duration_hours: float,
         timezone_name: Optional[str] = None,
     ):
         """Import multiple MRC matches from bulk text."""
@@ -530,6 +544,7 @@ class MRCCog(commands.Cog):
                 return
 
             default_timezone = normalize_timezone(timezone_name, self.get_default_timezone(guild.id))
+            duration_hours = validate_duration_hours(duration_hours)
             lines = schedule.strip().split("\n")
             imported = 0
             failed = []
@@ -538,24 +553,36 @@ class MRCCog(commands.Cog):
                 parsed = self.parse_mrc_line(line, default_timezone)
                 if parsed:
                     dt, round_group, bracket, used_timezone = parsed
+                    event_database_id = None
                     try:
-                        event_id = await self.create_discord_event(guild, dt, round_group, bracket)
-                        self.db.add_mrc_match(
+                        event_database_id = self.db.add_mrc_match(
                             guild.id,
                             to_utc_iso(dt),
                             round_group,
                             bracket,
-                            discord_event_id=event_id,
                             timezone_name=used_timezone,
+                            duration_hours=duration_hours,
                         )
+                        event_id = await self.create_discord_event(
+                            guild,
+                            dt,
+                            round_group,
+                            bracket,
+                            duration_hours,
+                            event_database_id,
+                        )
+                        self.db.update_mrc_match(guild.id, event_database_id, discord_event_id=event_id)
                         imported += 1
                     except Exception as e:
+                        if event_database_id is not None:
+                            self.db.delete_mrc_match(guild.id, event_database_id)
                         failed.append((line, str(e)))
                 else:
                     failed.append((line, "Could not parse line"))
 
             response = "**MRC Schedule Import Results**\n"
             response += f"Successfully imported: **{imported}** matches\n"
+            response += f"Duration: **{duration_hours:g}** hour(s)\n"
             if failed:
                 response += f"Failed to import: **{len(failed)}** matches\n\n"
                 response += "**Failed entries:**\n"
@@ -577,6 +604,7 @@ class MRCCog(commands.Cog):
         datetime_str="Date and time (e.g., 'April 25 1:00 PM')",
         rounds="Round group (e.g., 'Rounds 1-3' or '1-3')",
         bracket="Upper or Lower bracket",
+        duration_hours="Event duration in hours, such as 2 or 1.5",
         timezone_name="Timezone abbreviation or IANA name",
     )
     @app_commands.choices(bracket=BRACKET_CHOICES)
@@ -586,6 +614,7 @@ class MRCCog(commands.Cog):
         datetime_str: str,
         rounds: str,
         bracket: str,
+        duration_hours: float,
         timezone_name: Optional[str] = None,
     ):
         """Add a single MRC match."""
@@ -599,24 +628,32 @@ class MRCCog(commands.Cog):
                 return
 
             used_timezone = normalize_timezone(timezone_name, self.get_default_timezone(guild.id))
+            duration_hours = validate_duration_hours(duration_hours)
             dt = self.parse_mrc_datetime(datetime_str, used_timezone)
             round_group = self.normalize_round_group(rounds)
 
-            event_id = await self.create_discord_event(guild, dt, round_group, bracket)
+            match_id = None
             match_id = self.db.add_mrc_match(
                 guild.id,
                 to_utc_iso(dt),
                 round_group,
                 bracket,
-                discord_event_id=event_id,
                 timezone_name=used_timezone,
+                duration_hours=duration_hours,
             )
+            try:
+                event_id = await self.create_discord_event(guild, dt, round_group, bracket, duration_hours, match_id)
+                self.db.update_mrc_match(guild.id, match_id, discord_event_id=event_id)
+            except Exception:
+                self.db.delete_mrc_match(guild.id, match_id)
+                raise
 
-            response = "**MRC Match Added**\n"
-            response += f"**ID:** {match_id}\n"
+            response = "**MRC Event Added**\n"
+            response += f"**Event ID:** {match_id}\n"
             response += f"**Time:** {discord_time_display(to_utc_iso(dt), used_timezone)}\n"
             response += f"**Round:** {round_group}\n"
             response += f"**Bracket:** {bracket}\n"
+            response += f"**Duration:** {duration_hours:g} hour(s)\n"
             response += f"**Status:** Scheduled"
             await interaction.followup.send(response)
         except Exception as e:
@@ -627,7 +664,8 @@ class MRCCog(commands.Cog):
         return await self.timezone_autocomplete(interaction, current)
 
     @mrc_group.command(name="session", description="Start an interactive session to add multiple matches")
-    async def mrc_session(self, interaction: discord.Interaction):
+    @app_commands.describe(duration_hours="Event duration in hours for every match in this session")
+    async def mrc_session(self, interaction: discord.Interaction, duration_hours: float):
         """Start interactive session for adding matches line by line."""
         try:
             self.ensure_manager(interaction)
@@ -639,12 +677,14 @@ class MRCCog(commands.Cog):
                 return
 
             default_timezone = self.get_default_timezone(guild.id)
+            duration_hours = validate_duration_hours(duration_hours)
             user = interaction.user
             channel = interaction.channel
 
             await channel.send(
                 f"**MRC Session started for {user.mention}**\n"
                 f"Default timezone: `{default_timezone}`\n"
+                f"Duration: `{duration_hours:g}` hour(s)\n"
                 f"Enter MRC schedule lines one per message (format: 'April 25 1:00 PM Rounds 1-3 Upper')\n"
                 f"Type `done` when finished.\n"
                 f"Type `cancel` to abort."
@@ -670,19 +710,30 @@ class MRCCog(commands.Cog):
                     parsed = self.parse_mrc_line(content, default_timezone)
                     if parsed:
                         dt, round_group, bracket, used_timezone = parsed
+                        event_database_id = None
                         try:
-                            event_id = await self.create_discord_event(guild, dt, round_group, bracket)
-                            self.db.add_mrc_match(
+                            event_database_id = self.db.add_mrc_match(
                                 guild.id,
                                 to_utc_iso(dt),
                                 round_group,
                                 bracket,
-                                discord_event_id=event_id,
                                 timezone_name=used_timezone,
+                                duration_hours=duration_hours,
                             )
+                            event_id = await self.create_discord_event(
+                                guild,
+                                dt,
+                                round_group,
+                                bracket,
+                                duration_hours,
+                                event_database_id,
+                            )
+                            self.db.update_mrc_match(guild.id, event_database_id, discord_event_id=event_id)
                             imported += 1
                             await msg.add_reaction("\N{WHITE HEAVY CHECK MARK}")
                         except Exception as e:
+                            if event_database_id is not None:
+                                self.db.delete_mrc_match(guild.id, event_database_id)
                             await msg.reply(f"Warning: {str(e)}")
                     else:
                         await msg.reply("Could not parse. Use format: 'April 25 1:00 PM Rounds 1-3 Upper'")
@@ -752,17 +803,17 @@ class MRCCog(commands.Cog):
             await interaction.followup.send(f"No MRC matches scheduled in the next {days} day(s).")
             return
 
-        view = MRCMatchPageView(self, matches, f"Upcoming MRC Matches ({days} days)")
+        view = MRCMatchPageView(self, matches, f"Upcoming MRC Events ({days} days)")
         await interaction.followup.send(embed=view.build_embed(), view=view)
 
     @mrc_group.command(name="edit", description="Edit an existing MRC match")
     @app_commands.describe(
-        match_id="ID of the match to edit",
+        event_id="Event ID to edit",
     )
     async def mrc_edit(
         self,
         interaction: discord.Interaction,
-        match_id: int,
+        event_id: int,
     ):
         """Open a prefilled modal to edit an existing MRC match."""
         try:
@@ -773,25 +824,26 @@ class MRCCog(commands.Cog):
                 await interaction.response.send_message("Error: This command can only be used in a server.", ephemeral=True)
                 return
 
-            match = self.db.get_mrc_match(guild.id, match_id)
+            match = self.db.get_mrc_match(guild.id, event_id)
             if not match:
-                await interaction.response.send_message(f"Match with ID {match_id} not found.", ephemeral=True)
+                await interaction.response.send_message(f"Event ID {event_id} not found.", ephemeral=True)
                 return
 
             await interaction.response.send_modal(MRCEditModal(self, guild.id, match))
         except Exception as e:
             await self.send_error(interaction, e)
 
-    @mrc_edit.autocomplete("match_id")
+    @mrc_edit.autocomplete("event_id")
     async def mrc_edit_match_autocomplete(self, interaction: discord.Interaction, current: str):
         return await self.match_id_autocomplete(interaction, current)
 
     @mrc_group.command(name="status", description="Set an MRC match status")
+    @app_commands.describe(event_id="Event ID to update")
     @app_commands.choices(status=STATUS_CHOICES)
     async def mrc_status(
         self,
         interaction: discord.Interaction,
-        match_id: int,
+        event_id: int,
         status: str,
     ):
         try:
@@ -801,18 +853,28 @@ class MRCCog(commands.Cog):
             if not guild:
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
                 return
-            match = self.db.get_mrc_match(guild.id, match_id)
+            match = self.db.get_mrc_match(guild.id, event_id)
             if not match:
-                await interaction.followup.send(f"Match with ID {match_id} not found.", ephemeral=True)
+                await interaction.followup.send(f"Event ID {event_id} not found.", ephemeral=True)
                 return
             status = self.normalize_status(status)
-            self.db.update_mrc_match(guild.id, match_id, status=status)
-            updated = self.db.get_mrc_match(guild.id, match_id)
-            await interaction.followup.send(f"**Match Status Updated**\n{self.build_match_line(updated)}")
+            self.db.update_mrc_match(guild.id, event_id, status=status)
+            updated = self.db.get_mrc_match(guild.id, event_id)
+            if updated["discord_event_id"]:
+                await self.update_discord_event(
+                    guild,
+                    updated["discord_event_id"],
+                    parse_stored_datetime(updated["datetime"]),
+                    updated["round_group"],
+                    updated["bracket"],
+                    updated["duration_hours"],
+                    updated["id"],
+                )
+            await interaction.followup.send(f"**Event Status Updated**\n{self.build_match_line(updated)}")
         except Exception as e:
             await self.send_error(interaction, e)
 
-    @mrc_status.autocomplete("match_id")
+    @mrc_status.autocomplete("event_id")
     async def mrc_status_match_autocomplete(self, interaction: discord.Interaction, current: str):
         return await self.match_id_autocomplete(interaction, current)
 
@@ -860,6 +922,15 @@ class MRCCog(commands.Cog):
                     except (TypeError, ValueError):
                         event_exists = False
                 if event_exists:
+                    await self.update_discord_event(
+                        guild,
+                        match["discord_event_id"],
+                        parse_stored_datetime(match["datetime"]),
+                        match["round_group"],
+                        match["bracket"],
+                        match["duration_hours"],
+                        match["id"],
+                    )
                     continue
 
                 missing += 1
@@ -870,11 +941,13 @@ class MRCCog(commands.Cog):
                         match_dt,
                         match["round_group"],
                         match["bracket"],
+                        match["duration_hours"],
+                        match["id"],
                     )
                     self.db.update_mrc_match(guild.id, match["id"], discord_event_id=event_id)
                     repaired += 1
                 except Exception as exc:
-                    failed.append(f"#{match['id']}: {str(exc)}")
+                    failed.append(f"Event ID {match['id']}: {str(exc)}")
 
             response = "**MRC Event Repair Complete**\n"
             response += f"Checked: {checked}\n"
@@ -889,8 +962,8 @@ class MRCCog(commands.Cog):
             await self.send_error(interaction, e)
 
     @mrc_group.command(name="delete", description="Delete an MRC match")
-    @app_commands.describe(match_id="ID of the match to delete")
-    async def mrc_delete(self, interaction: discord.Interaction, match_id: int):
+    @app_commands.describe(event_id="Event ID to delete")
+    async def mrc_delete(self, interaction: discord.Interaction, event_id: int):
         """Delete an MRC match and its Discord event."""
         try:
             self.ensure_manager(interaction)
@@ -901,20 +974,20 @@ class MRCCog(commands.Cog):
                 await interaction.followup.send("Error: This command can only be used in a server.", ephemeral=True)
                 return
 
-            match = self.db.get_mrc_match(guild.id, match_id)
+            match = self.db.get_mrc_match(guild.id, event_id)
             if not match:
-                await interaction.followup.send(f"Match with ID {match_id} not found.", ephemeral=True)
+                await interaction.followup.send(f"Event ID {event_id} not found.", ephemeral=True)
                 return
 
             if match["discord_event_id"]:
                 await self.delete_discord_event(guild, match["discord_event_id"])
 
-            self.db.delete_mrc_match(guild.id, match_id)
-            await interaction.followup.send(f"Match {match_id} deleted.")
+            self.db.delete_mrc_match(guild.id, event_id)
+            await interaction.followup.send(f"Event ID {event_id} deleted.")
         except Exception as e:
             await self.send_error(interaction, e)
 
-    @mrc_delete.autocomplete("match_id")
+    @mrc_delete.autocomplete("event_id")
     async def mrc_delete_match_autocomplete(self, interaction: discord.Interaction, current: str):
         return await self.match_id_autocomplete(interaction, current)
 
@@ -954,6 +1027,7 @@ class MRCCog(commands.Cog):
                     f"**Time:** {discord_time_display(match['datetime'], match['timezone'])}\n"
                     f"**Round:** {match['round_group']}\n"
                     f"**Bracket:** {match['bracket']}\n"
+                    f"**Duration:** {match['duration_hours']:g} hour(s)\n"
                     f"**Status:** {match['status']}"
                 )
                 if event_url:

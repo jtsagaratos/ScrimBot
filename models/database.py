@@ -32,6 +32,7 @@ class DatabaseManager:
                 timezone TEXT NOT NULL DEFAULT 'US/Eastern',
                 status TEXT NOT NULL DEFAULT 'Scheduled',
                 archived INTEGER NOT NULL DEFAULT 0,
+                duration_hours REAL NOT NULL DEFAULT 2.0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -46,6 +47,9 @@ class DatabaseManager:
                 datetime TEXT NOT NULL,
                 timezone TEXT NOT NULL,
                 discord_event_id TEXT,
+                duration_hours REAL NOT NULL DEFAULT 2.0,
+                status TEXT NOT NULL DEFAULT 'Scheduled',
+                archived INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -94,6 +98,10 @@ class DatabaseManager:
         self._ensure_column(cursor, "mrc_matches", "timezone", "TEXT NOT NULL DEFAULT 'US/Eastern'")
         self._ensure_column(cursor, "mrc_matches", "status", "TEXT NOT NULL DEFAULT 'Scheduled'")
         self._ensure_column(cursor, "mrc_matches", "archived", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column(cursor, "mrc_matches", "duration_hours", "REAL NOT NULL DEFAULT 2.0")
+        self._ensure_column(cursor, "scrim_events", "duration_hours", "REAL NOT NULL DEFAULT 2.0")
+        self._ensure_column(cursor, "scrim_events", "status", "TEXT NOT NULL DEFAULT 'Scheduled'")
+        self._ensure_column(cursor, "scrim_events", "archived", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(cursor, "guild_settings", "manager_role_id", "INTEGER")
 
         conn.commit()
@@ -129,8 +137,9 @@ class DatabaseManager:
             'timezone': row[8],
             'status': row[9],
             'archived': row[10],
-            'created_at': row[11],
-            'updated_at': row[12]
+            'duration_hours': row[11],
+            'created_at': row[12],
+            'updated_at': row[13]
         }
 
     def _row_to_scrim(self, row) -> Dict:
@@ -142,8 +151,11 @@ class DatabaseManager:
             'datetime': row[4],
             'timezone': row[5],
             'discord_event_id': row[6],
-            'created_at': row[7],
-            'updated_at': row[8],
+            'duration_hours': row[7],
+            'status': row[8],
+            'archived': row[9],
+            'created_at': row[10],
+            'updated_at': row[11],
         }
 
     # ==================== SETTINGS ====================
@@ -368,7 +380,8 @@ class DatabaseManager:
                       bracket: str, opponent: Optional[str] = None,
                       discord_event_id: Optional[str] = None,
                       timezone_name: str = "US/Eastern",
-                      status: str = "Scheduled") -> int:
+                      status: str = "Scheduled",
+                      duration_hours: float = 2.0) -> int:
         """Add a new MRC match to database. Returns the match ID."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -378,10 +391,10 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT INTO mrc_matches
                 (guild_id, datetime, round_group, bracket, opponent, discord_event_id,
-                 timezone, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 timezone, status, duration_hours, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (guild_id, datetime_str, round_group, bracket, opponent, discord_event_id,
-                  timezone_name, status, now, now))
+                  timezone_name, status, duration_hours, now, now))
 
             conn.commit()
             return cursor.lastrowid
@@ -396,7 +409,7 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 SELECT id, guild_id, datetime, round_group, bracket, opponent, discord_event_id,
-                       reminder_sent_30, timezone, status, archived, created_at, updated_at
+                       reminder_sent_30, timezone, status, archived, duration_hours, created_at, updated_at
                 FROM mrc_matches
                 WHERE id = ? AND guild_id = ?
             ''', (match_id, guild_id))
@@ -428,7 +441,7 @@ class DatabaseManager:
 
             cursor.execute('''
                 SELECT id, guild_id, datetime, round_group, bracket, opponent, discord_event_id,
-                       reminder_sent_30, timezone, status, archived, created_at, updated_at
+                       reminder_sent_30, timezone, status, archived, duration_hours, created_at, updated_at
                 FROM mrc_matches
                 WHERE ''' + " AND ".join(where_clauses) + '''
                 ORDER BY datetime ASC
@@ -461,7 +474,7 @@ class DatabaseManager:
         """
         Update an MRC match with provided fields.
         Allowed fields: datetime, round_group, bracket, opponent, discord_event_id,
-        reminder_sent_30, timezone, status, archived
+        reminder_sent_30, timezone, status, archived, duration_hours
         """
         allowed_fields = {
             'datetime',
@@ -473,6 +486,7 @@ class DatabaseManager:
             'timezone',
             'status',
             'archived',
+            'duration_hours',
         }
         update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
 
@@ -533,7 +547,7 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 SELECT id, guild_id, datetime, round_group, bracket, opponent, discord_event_id,
-                       reminder_sent_30, timezone, status, archived, created_at, updated_at
+                       reminder_sent_30, timezone, status, archived, duration_hours, created_at, updated_at
                 FROM mrc_matches
                 WHERE reminder_sent_30 = 0
                   AND archived = 0
@@ -579,7 +593,9 @@ class DatabaseManager:
 
     def add_scrim(self, guild_id: int, team_name: str, role_id: Optional[int],
                   datetime_str: str, timezone_name: str,
-                  discord_event_id: Optional[str]) -> int:
+                  discord_event_id: Optional[str],
+                  duration_hours: float = 2.0,
+                  status: str = "Scheduled") -> int:
         conn = self.get_connection()
         cursor = conn.cursor()
         now = self._utc_now_iso()
@@ -587,36 +603,143 @@ class DatabaseManager:
         try:
             cursor.execute('''
                 INSERT INTO scrim_events
-                (guild_id, team_name, role_id, datetime, timezone, discord_event_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (guild_id, team_name, role_id, datetime_str, timezone_name, discord_event_id, now, now))
+                (guild_id, team_name, role_id, datetime, timezone, discord_event_id,
+                 duration_hours, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (guild_id, team_name, role_id, datetime_str, timezone_name, discord_event_id,
+                  duration_hours, status, now, now))
             conn.commit()
             return cursor.lastrowid
         finally:
             conn.close()
 
-    def get_upcoming_scrims(self, guild_id: int, days: int = 14) -> List[Dict]:
+    def get_upcoming_scrims(
+        self,
+        guild_id: int,
+        days: int = 14,
+        include_completed: bool = False,
+        include_archived: bool = False,
+    ) -> List[Dict]:
+        now = datetime.now(timezone.utc)
+        cutoff = now + timedelta(days=days)
+        scrims = []
+        for scrim in self.get_all_scrims(
+            guild_id,
+            include_completed=include_completed,
+            include_archived=include_archived,
+        ):
+            dt = self._parse_stored_datetime(scrim['datetime'])
+            if now <= dt <= cutoff:
+                scrims.append(scrim)
+        return scrims
+
+    def get_all_scrims(
+        self,
+        guild_id: int,
+        include_completed: bool = True,
+        include_archived: bool = False,
+    ) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            where_clauses = ["guild_id = ?"]
+            values = [guild_id]
+            if not include_archived:
+                where_clauses.append("archived = 0")
+            if not include_completed:
+                where_clauses.append("status NOT IN ('Completed', 'Cancelled')")
+
+            cursor.execute('''
+                SELECT id, guild_id, team_name, role_id, datetime, timezone, discord_event_id,
+                       duration_hours, status, archived, created_at, updated_at
+                FROM scrim_events
+                WHERE ''' + " AND ".join(where_clauses) + '''
+                ORDER BY datetime ASC
+            ''', values)
+            return [self._row_to_scrim(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_scrim(self, guild_id: int, scrim_id: int) -> Optional[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
 
         try:
             cursor.execute('''
                 SELECT id, guild_id, team_name, role_id, datetime, timezone, discord_event_id,
-                       created_at, updated_at
+                       duration_hours, status, archived, created_at, updated_at
                 FROM scrim_events
-                WHERE guild_id = ?
-                ORDER BY datetime ASC
-            ''', (guild_id,))
-            rows = cursor.fetchall()
+                WHERE id = ? AND guild_id = ?
+            ''', (scrim_id, guild_id))
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_scrim(row)
+            return None
         finally:
             conn.close()
 
-        now = datetime.now(timezone.utc)
-        cutoff = now + timedelta(days=days)
-        scrims = []
-        for row in rows:
-            scrim = self._row_to_scrim(row)
-            dt = self._parse_stored_datetime(scrim['datetime'])
-            if now <= dt <= cutoff:
-                scrims.append(scrim)
-        return scrims
+    def update_scrim(self, guild_id: int, scrim_id: int, **kwargs) -> bool:
+        allowed_fields = {
+            'team_name',
+            'role_id',
+            'datetime',
+            'timezone',
+            'discord_event_id',
+            'duration_hours',
+            'status',
+            'archived',
+        }
+        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
+        if not update_fields:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            set_clause = ', '.join([f"{field} = ?" for field in update_fields.keys()])
+            update_fields['updated_at'] = self._utc_now_iso()
+            set_clause += ", updated_at = ?"
+            values = list(update_fields.values()) + [scrim_id, guild_id]
+
+            cursor.execute(f'''
+                UPDATE scrim_events
+                SET {set_clause}
+                WHERE id = ? AND guild_id = ?
+            ''', values)
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def delete_scrim(self, guild_id: int, scrim_id: int) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                DELETE FROM scrim_events
+                WHERE id = ? AND guild_id = ?
+            ''', (scrim_id, guild_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def archive_completed_scrims(self, guild_id: int) -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE scrim_events
+                SET archived = 1, updated_at = ?
+                WHERE guild_id = ?
+                  AND archived = 0
+                  AND status IN ('Completed', 'Cancelled')
+            ''', (self._utc_now_iso(), guild_id))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()

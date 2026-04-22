@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 import pytz
@@ -81,6 +81,26 @@ def to_utc_iso(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def validate_duration_hours(duration_hours) -> float:
+    """Validate a Discord event duration entered as hours."""
+    try:
+        duration = float(duration_hours)
+    except (TypeError, ValueError):
+        raise ValueError("Duration hours must be a number.")
+
+    if duration <= 0:
+        raise ValueError("Duration hours must be greater than 0.")
+    if duration > 24:
+        raise ValueError("Duration hours must be 24 or less.")
+    return duration
+
+
+def event_end_time(start_time: datetime, duration_hours) -> datetime:
+    """Return an event end time based on a validated hour duration."""
+    duration = validate_duration_hours(duration_hours)
+    return start_time + timedelta(minutes=round(duration * 60))
 
 
 def parse_stored_datetime(value: str) -> datetime:
