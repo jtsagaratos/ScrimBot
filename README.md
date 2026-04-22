@@ -1,14 +1,14 @@
 # ScrimBot User Guide
 
-ScrimBot is a Discord bot for scrims, MRC match scheduling, Ignite result tracking, reminders, and upcoming schedule views. It creates Discord Scheduled Events, stores data per server, and shows Discord-native timestamps so every player sees local times in their own timezone.
+ScrimBot is a Discord bot for scrims, MRC event scheduling, Ignite result tracking, reminders, and upcoming schedule views. It creates Discord Scheduled Events, stores data per server, and shows Discord-native timestamps so every player sees local times in their own timezone.
 
 ## What The Bot Does
 
 - Create scrim events against plain-text opponent names.
-- Add, import, edit, view, archive, and delete MRC matches.
+- Add, import, edit, view, archive, and delete MRC events.
 - Send 30-minute MRC reminders to a configured channel.
 - Ping configured reminder roles.
-- Show upcoming MRC matches and scrims.
+- Show upcoming MRC events and scrims.
 - Track Ignite results from Liquipedia and auto-post new results.
 - Keep settings independent per Discord server.
 - Let configured manager roles operate the bot without full admin permissions.
@@ -273,7 +273,7 @@ Use `cancel` to stop.
 /mrc view
 ```
 
-By default this hides completed, cancelled, and archived matches.
+By default this hides completed, cancelled, and archived events.
 
 Show completed/cancelled:
 
@@ -291,13 +291,13 @@ Long schedules have Previous/Next buttons.
 
 ### View Upcoming Items
 
-MRC matches only:
+MRC events only:
 
 ```text
 /mrc upcoming days:14
 ```
 
-MRC matches and scrims together:
+MRC events and scrims together:
 
 ```text
 /upcoming days:14
@@ -321,7 +321,7 @@ Submit the form to update the database and the linked Discord Scheduled Event.
 Use `/mrc status` to change event status.
 The linked Discord Scheduled Event description includes the bot's `Event ID`.
 
-### Change Match Status
+### Change Event Status
 
 ```text
 /mrc status event_id:12 status:"In Progress"
@@ -336,13 +336,13 @@ Supported statuses:
 - `Completed`
 - `Cancelled`
 
-### Archive Completed Matches
+### Archive Completed Events
 
 ```text
 /mrc archive_completed
 ```
 
-This archives completed and cancelled matches so normal schedule views stay clean.
+This archives completed and cancelled events so normal schedule views stay clean.
 
 ### Repair Missing Discord Events
 
@@ -352,7 +352,7 @@ If Discord Scheduled Events were deleted manually, recreate them:
 /mrc repair_events
 ```
 
-Include completed/cancelled matches:
+Include completed/cancelled events:
 
 ```text
 /mrc repair_events include_completed:true
@@ -421,20 +421,20 @@ In Discord, the `<t:...>` parts render as real local times.
 | `/scrim ping_role_add role:@Role` | Adds a role to ping when scrims are created. |
 | `/scrim ping_role_remove role:@Role` | Removes a scrim ping role. |
 | `/scrim ping_role_list` | Lists scrim ping roles. |
-| `/upcoming days:14` | Shows upcoming MRC matches and scrims together. |
+| `/upcoming days:14` | Shows upcoming MRC events and scrims together. |
 
 ### MRC Scheduling
 
 | Command | What It Does |
 | --- | --- |
-| `/mrc add` | Adds one MRC match with a required event duration. |
-| `/mrc import` | Bulk imports many MRC matches from pasted text with one required duration for all imported events. |
-| `/mrc session` | Adds matches one by one in chat with one required duration for the session. |
-| `/mrc view` | Shows active MRC matches with pagination. |
-| `/mrc upcoming` | Shows upcoming MRC matches. |
+| `/mrc add` | Adds one MRC event with a required event duration. |
+| `/mrc import` | Bulk imports many MRC events from pasted text with one required duration for all imported events. |
+| `/mrc session` | Adds events one by one in chat with one required duration for the session. |
+| `/mrc view` | Shows active MRC events with pagination. |
+| `/mrc upcoming` | Shows upcoming MRC events. |
 | `/mrc edit event_id` | Opens a prefilled edit form. |
-| `/mrc status` | Sets match status. |
-| `/mrc archive_completed` | Archives completed/cancelled matches. |
+| `/mrc status` | Sets event status. |
+| `/mrc archive_completed` | Archives completed/cancelled events. |
 | `/mrc repair_events` | Recreates missing Discord Scheduled Events. |
 | `/mrc delete` | Deletes a match and its linked event. |
 
@@ -483,7 +483,7 @@ The bot itself needs:
 
 All main data is separated by Discord server:
 
-- MRC matches
+- MRC events
 - scrims
 - reminder channels
 - reminder roles
